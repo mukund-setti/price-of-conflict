@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback, useId } from "react";
+import {
+  useState, useEffect, useRef, useMemo, useCallback, useId,
+  createContext, useContext, Component,
+} from "react";
 import * as d3 from "d3";
 import * as Chart from "chart.js";
 import _ from "lodash";
@@ -15,6 +18,8 @@ try {
   ].filter(Boolean);
   Chart.Chart.register(...toRegister);
 } catch(e) { console.warn("Chart.js registration:", e); }
+
+const ReducedMotionContext = createContext(false);
 
 // ══════════════════════════════════════════════
 // DATA: Real EIA monthly averages ($/gal, regular grade)
@@ -516,7 +521,7 @@ const BORDER = "#252525";
 /** Story mode: section ids for scroll spy + sidebar (order = scroll order) */
 const STORY_CHAPTERS = [
   { id: "story-hero", label: "Intro" },
-  { id: "story-stats", label: "At a glance" },
+  { id: "main-content", label: "At a glance" },
   { id: "story-drivers", label: "What drives prices" },
   { id: "story-ch1", label: "35 years of prices", sub: "Ch. 01" },
   { id: "story-chain", label: "The price chain" },
@@ -832,6 +837,43 @@ function useIsMobile(breakpoint = 680) {
   return isMobile;
 }
 
+function usePrefersReducedMotion() {
+  const [prefersReduced, setPrefersReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReduced(mq.matches);
+    const handler = (e) => setPrefersReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return prefersReduced;
+}
+
+function LazyChartShell({ height = 300, children }) {
+  const ref = useRef(null);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShow(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref}>
+      {show ? children : <ChartSkeleton h={height} />}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════
 // CHART ANNOTATIONS: key narrative moments
 // ══════════════════════════════════════════════
@@ -847,15 +889,51 @@ const ANNOTATIONS = [
   { date: "2026-03", label: "Hormuz crisis", anchor: "top", color: "#dc2626" },
 ];
 
+const STATE_TAX_RANK = Object.fromEntries(
+  Object.entries(STATE_DATA)
+    .sort((a, b) => b[1].tax - a[1].tax)
+    .map(([code], i) => [code, i + 1])
+);
+
+const GUIDED_ANNOTATIONS = [
+  { date: "1990-10", label: "Gulf War", insight: "Iraq invades Kuwait. Prices jump 47% in 3 months.", price: 1.59 },
+  { date: "2001-09", label: "September 11", insight: "Demand shock. Aviation fuel consumption crashes overnight.", price: 1.36 },
+  { date: "2008-06", label: "2008 Oil Supercycle", insight: "China demand and speculation push gas to $4.11, highest ever at the time.", price: 4.11 },
+  { date: "2020-04", label: "COVID-19 Crash", insight: "Lockdowns kill demand. Oil briefly goes negative. Gas drops 32%.", price: 1.77 },
+  { date: "2022-06", label: "Russia-Ukraine", insight: "Europe scrambles for alternatives. U.S. gas hits $4.93.", price: 4.93 },
+  { date: "2026-03", label: "Iran/Hormuz 2026", insight: "Largest supply disruption in history. Gas passes $4.18 and climbing.", price: 4.18 },
+];
+
+function exportPriceCSV() {
+  const rows = [["Date", "Price", "Conflict"]];
+  NATIONAL_MONTHLY.forEach((d) => {
+    const conflict = CONFLICTS.find((c) => d.date >= c.start && d.date <= c.end);
+    rows.push([d.date, d.price, conflict ? conflict.name : ""]);
+  });
+  const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "price-of-conflict-data.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ══════════════════════════════════════════════
 // COMPONENTS
 // ══════════════════════════════════════════════
 
 // ── Animated counter ──
 function AnimatedNumber({ value, prefix = "", suffix = "", decimals = 2 }) {
-  const [display, setDisplay] = useState(0);
+  const reducedMotion = useContext(ReducedMotionContext);
+  const [display, setDisplay] = useState(reducedMotion ? value : 0);
   const ref = useRef(null);
   useEffect(() => {
+    if (reducedMotion) {
+      setDisplay(value);
+      return;
+    }
     let frame;
     const start = display;
     const diff = value - start;
@@ -870,22 +948,27 @@ function AnimatedNumber({ value, prefix = "", suffix = "", decimals = 2 }) {
     };
     frame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(frame);
-  }, [value]);
+  }, [value, reducedMotion]);
   return <span>{prefix}{display.toFixed(decimals)}{suffix}</span>;
 }
 
 // ── Scroll-triggered fade-in ──
 function FadeIn({ children, delay = 0, className = "" }) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
+    if (reducedMotion) {
+      setVisible(true);
+      return;
+    }
     const obs = new IntersectionObserver(
       ([e]) => { if (e.isIntersecting) { setVisible(true); obs.disconnect(); } },
       { threshold: 0.15 }
     );
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
-  }, []);
+  }, [reducedMotion]);
   return (
     <div
       ref={ref}
@@ -893,7 +976,7 @@ function FadeIn({ children, delay = 0, className = "" }) {
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateY(0)" : "translateY(32px)",
-        transition: `opacity 0.7s ease ${delay}s, transform 0.7s ease ${delay}s`,
+        transition: reducedMotion ? "none" : `opacity 0.7s ease ${delay}s, transform 0.7s ease ${delay}s`,
       }}
     >
       {children}
@@ -901,18 +984,217 @@ function FadeIn({ children, delay = 0, className = "" }) {
   );
 }
 
+function InsightCallout({ children }) {
+  return (
+    <div style={{
+      margin: "32px 0",
+      padding: "20px 24px",
+      borderLeft: `3px solid ${ACCENT}`,
+      background: `${ACCENT}06`,
+      borderRadius: "0 12px 12px 0",
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: ACCENT, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+        Key Insight
+      </div>
+      <div style={{ fontSize: 15, color: TEXT_BRIGHT, lineHeight: 1.6 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ChapterCountUp({ num }) {
+  const reducedMotion = useContext(ReducedMotionContext);
+  const ref = useRef(null);
+  const [v, setV] = useState(reducedMotion ? num : 0);
+  const [started, setStarted] = useState(reducedMotion);
+  useEffect(() => {
+    if (reducedMotion) {
+      setStarted(true);
+      setV(num);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting && !started) { setStarted(true); obs.disconnect(); } },
+      { threshold: 0.25 }
+    );
+    if (ref.current) obs.observe(ref.current);
+    return () => obs.disconnect();
+  }, [started, reducedMotion, num]);
+  useEffect(() => {
+    if (!started) return;
+    if (reducedMotion) {
+      setV(num);
+      return;
+    }
+    const t0 = performance.now();
+    const dur = 700;
+    const tick = (now) => {
+      const p = Math.min((now - t0) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setV(Math.round(num * eased));
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [started, num, reducedMotion]);
+  return (
+    <span ref={ref} style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", fontWeight: 600 }}>
+      Chapter {String(v).padStart(2, "0")}
+    </span>
+  );
+}
+
+function PriceBreakdownBar({ stateCode }) {
+  const reducedMotion = useContext(ReducedMotionContext);
+  const st = stateCode ? STATE_DATA[stateCode] : null;
+  const stateTax = st ? st.tax : 0.368;
+  const statePct = (stateTax / 4.18) * 100;
+  const [hover, setHover] = useState(null);
+  const [barIn, setBarIn] = useState(false);
+  const [pulseDone, setPulseDone] = useState(reducedMotion);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setBarIn(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  useEffect(() => {
+    if (reducedMotion) {
+      setPulseDone(true);
+      return;
+    }
+    const id = setTimeout(() => setPulseDone(true), 4500);
+    return () => clearTimeout(id);
+  }, [reducedMotion]);
+
+  const segs = [
+    { key: "c", label: "Crude oil", pct: 53, color: "#3b82f6",
+      dollars: 2.22,
+      explain: "Crude oil: Set by global commodity markets. Brent crude is currently near $94/barrel equivalent in this model." },
+    { key: "r", label: "Refining", pct: 13, color: "#f59e0b", dollars: 0.54,
+      explain: "Refining: Margins reflect capacity use, maintenance, and summer blend switches." },
+    { key: "d", label: "Distribution and marketing", pct: 10, color: "#2dd4bf", dollars: 0.42,
+      explain: "Distribution and marketing: Pipelines, trucks, stations, and retail margin." },
+    { key: "f", label: "Federal tax", pct: (0.184 / 4.18) * 100, color: "#6b7280", dollars: 0.184,
+      explain: "Federal tax: Fixed 18.4 cents per gallon (not ad valorem)." },
+    { key: "s", label: st ? `State tax (${(stateTax * 100).toFixed(1)} cents)` : "State taxes (avg)", pct: statePct, color: "#a78bfa", dollars: stateTax,
+      explain: st
+        ? `State tax: ${st.name} rate embedded from Tax Foundation 2025 data.`
+        : "State taxes (avg): National average state excise about 36.8 cents." },
+    { key: "x", label: "Disruption premium", pct: 10.3, color: ACCENT, dollars: 0.43,
+      explain: "Disruption premium: Risk priced into current wholesale and retail from Hormuz and related events." },
+  ];
+
+  return (
+    <div style={{ marginTop: 28, marginBottom: 8 }}>
+      <style>{`
+        @keyframes breakdownPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+      `}</style>
+      <div style={{ fontSize: 18, fontFamily: DISPLAY_FONT, fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 14, textAlign: "center" }}>
+        $4.18 per gallon today
+      </div>
+      <div
+        style={{
+          display: "flex", alignItems: "flex-end", height: 44, borderRadius: 10, overflow: "hidden",
+          background: GRID, gap: 2, position: "relative",
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {segs.map((s, i) => (
+          <div
+            key={s.key}
+            onMouseEnter={() => setHover(i)}
+            style={{
+              flexGrow: barIn ? s.pct : 0,
+              flexShrink: 1,
+              flexBasis: 0,
+              minWidth: 4,
+              height: hover === null ? 36 : (hover === i ? 40 : 32),
+              background: s.color,
+              opacity: hover === null ? 1 : (hover === i ? 1 : 0.4),
+              transition: reducedMotion ? "height 0.2s ease, opacity 0.2s ease" : `height 0.2s ease, opacity 0.2s ease, flex-grow 0.75s cubic-bezier(0.22, 1, 0.36, 1) ${barIn ? i * 80 : 0}ms`,
+              animation: reducedMotion || s.key !== "x" || pulseDone ? "none" : "breakdownPulse 1.2s ease-in-out 2",
+            }}
+          />
+        ))}
+      </div>
+      {hover != null && (
+        <div style={{
+          marginTop: 10, padding: 12, borderRadius: 10, background: BG_CARD, border: `1px solid ${BORDER}`,
+          fontSize: 12, color: TEXT_DIM, lineHeight: 1.5,
+        }}>
+          <div style={{ fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 4 }}>{segs[hover].label}</div>
+          <div style={{ color: ACCENT_WARM }}>${segs[hover].dollars.toFixed(3)} ({segs[hover].pct.toFixed(1)}%)</div>
+          <div style={{ marginTop: 6 }}>{segs[hover].explain}</div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, justifyContent: "center" }}>
+        {segs.map((s) => (
+          <span key={s.key} style={{ fontSize: 10, color: TEXT_DIM }}><span style={{ color: s.color, marginRight: 4 }}>■</span>{s.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConflictSparkMini({ conflict }) {
+  const prices = NATIONAL_MONTHLY.filter((d) => d.date >= conflict.start && d.date <= conflict.end).map((d) => d.price);
+  if (prices.length < 2) {
+    return <div style={{ width: 40, height: 16, background: GRID, borderRadius: 2 }} />;
+  }
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const pad = 1;
+  const w = 40 - pad * 2;
+  const h = 16 - pad * 2;
+  const x = d3.scaleLinear().domain([0, prices.length - 1]).range([pad, 40 - pad]);
+  const y = d3.scaleLinear().domain([minP * 0.98, maxP * 1.02]).range([16 - pad, pad]);
+  const line = d3.line()
+    .x((_, i) => x(i))
+    .y((d) => y(d))
+    .curve(d3.curveMonotoneX);
+  return (
+    <svg width={40} height={16} style={{ overflow: "visible", flexShrink: 0 }}>
+      <path d={line(prices) || ""} fill="none" stroke={conflict.color} strokeWidth={1.5} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChartSkeleton({ h = 300 }) {
+  const reducedMotion = useContext(ReducedMotionContext);
+  return (
+    <div>
+      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+      <div style={{
+        height: h, borderRadius: 12,
+        background: `linear-gradient(90deg, ${BG_CARD} 25%, ${BORDER}33 50%, ${BG_CARD} 75%)`,
+        backgroundSize: "200% 100%",
+        animation: reducedMotion ? "none" : "shimmer 1.5s infinite",
+      }} />
+    </div>
+  );
+}
+
 // ── Scroll-triggered count-up (for big hero numbers) ──
 function CountUp({ target, prefix = "", suffix = "", duration = 2000 }) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const ref = useRef(null);
-  const [val, setVal] = useState(0);
-  const [started, setStarted] = useState(false);
+  const [val, setVal] = useState(reducedMotion ? target : 0);
+  const [started, setStarted] = useState(reducedMotion);
   useEffect(() => {
+    if (reducedMotion) {
+      setStarted(true);
+      setVal(target);
+      return;
+    }
     const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting && !started) { setStarted(true); obs.disconnect(); } }, { threshold: 0.3 });
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
-  }, [started]);
+  }, [started, reducedMotion, target]);
   useEffect(() => {
     if (!started) return;
+    if (reducedMotion) {
+      setVal(target);
+      return;
+    }
     const start = performance.now();
     const animate = (now) => {
       const p = Math.min((now - start) / duration, 1);
@@ -921,18 +1203,20 @@ function CountUp({ target, prefix = "", suffix = "", duration = 2000 }) {
       if (p < 1) requestAnimationFrame(animate);
     };
     requestAnimationFrame(animate);
-  }, [started, target, duration]);
+  }, [started, target, duration, reducedMotion]);
   return <span ref={ref}>{prefix}{typeof target === "number" && target % 1 !== 0 ? val.toFixed(2) : Math.round(val).toLocaleString()}{suffix}</span>;
 }
 
 // ── Animated gas pump price sign ──
 function GasPumpSign({ price }) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const [flicker, setFlicker] = useState(false);
   useEffect(() => {
+    if (reducedMotion) return;
     const id = setInterval(() => { setFlicker(f => !f); }, 150);
     const id2 = setTimeout(() => clearInterval(id), 1200);
     return () => { clearInterval(id); clearTimeout(id2); };
-  }, [price]);
+  }, [price, reducedMotion]);
   return (
     <div style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
@@ -943,9 +1227,9 @@ function GasPumpSign({ price }) {
       <div style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Regular</div>
       <div style={{
         fontFamily: "'Courier New', monospace", fontSize: 52, fontWeight: 900, letterSpacing: 2,
-        color: flicker ? `${ACCENT}90` : ACCENT,
+        color: reducedMotion ? ACCENT : (flicker ? `${ACCENT}90` : ACCENT),
         textShadow: `0 0 20px ${ACCENT}60, 0 0 40px ${ACCENT}30`,
-        transition: "color 0.1s",
+        transition: reducedMotion ? "none" : "color 0.1s",
       }}>
         {price.toFixed(2)}
       </div>
@@ -962,6 +1246,7 @@ function GasPumpSign({ price }) {
 // ── Household Cost Ticker: visceral dollar impact ──
 function HouseholdCostTicker() {
   const mobile = useIsMobile();
+  const reducedMotion = useContext(ReducedMotionContext);
   // Average US household uses ~1,200 gal/year
   // Extra cost = price spike × gallons during conflict period
   const data = [
@@ -1004,8 +1289,8 @@ function HouseholdCostTicker() {
                 height: "100%", borderRadius: 6,
                 background: `linear-gradient(90deg, ${d.color}cc, ${d.color})`,
                 width: `${(d.extra / maxExtra) * 100}%`,
-                transition: "width 1.2s cubic-bezier(0.22, 1, 0.36, 1)",
-                transitionDelay: `${i * 0.15}s`,
+                transition: reducedMotion ? "none" : "width 1.2s cubic-bezier(0.22, 1, 0.36, 1)",
+                transitionDelay: reducedMotion ? 0 : `${i * 0.15}s`,
                 display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 12,
               }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
@@ -1034,8 +1319,11 @@ function HouseholdCostTicker() {
 }
 
 // ── Animated conflict timeline with scrubber ──
-function ConflictScrubber({ onConflictHover }) {
+function ConflictScrubber({ onConflictHover, autoSequence = false }) {
   const [hoveredId, setHoveredId] = useState(null);
+  const [seqActive, setSeqActive] = useState(!!autoSequence);
+  const [seqIdx, setSeqIdx] = useState(-1);
+  const seqTRef = useRef(null);
   const containerRef = useRef(null);
 
   const timelineStart = 1990;
@@ -1046,6 +1334,27 @@ function ConflictScrubber({ onConflictHover }) {
     const [y, m] = dateStr.split("-").map(Number);
     return ((y + (m - 1) / 12) - timelineStart) / totalYears * 100;
   };
+
+  useEffect(() => {
+    if (!autoSequence || !seqActive) return;
+    let step = 0;
+    const tick = () => {
+      if (step >= CONFLICTS.length) {
+        setSeqIdx(-1);
+        setSeqActive(false);
+        onConflictHover?.(null);
+        return;
+      }
+      setSeqIdx(step);
+      onConflictHover?.(CONFLICTS[step]);
+      step += 1;
+      seqTRef.current = setTimeout(tick, 500);
+    };
+    seqTRef.current = setTimeout(tick, 900);
+    return () => { if (seqTRef.current) clearTimeout(seqTRef.current); };
+  }, [autoSequence, seqActive]);
+
+  const isHot = (c) => hoveredId === c.id || (seqActive && seqIdx >= 0 && CONFLICTS[seqIdx]?.id === c.id);
 
   return (
     <div ref={containerRef} style={{ position: "relative", padding: "20px 0 60px" }}>
@@ -1067,12 +1376,12 @@ function ConflictScrubber({ onConflictHover }) {
         {CONFLICTS.map(c => {
           const left = getPosition(c.start);
           const right = getPosition(c.end);
-          const isHovered = hoveredId === c.id;
+          const isHovered = isHot(c);
           return (
             <div
               key={c.id}
-              onMouseEnter={() => { setHoveredId(c.id); onConflictHover?.(c); }}
-              onMouseLeave={() => { setHoveredId(null); onConflictHover?.(null); }}
+              onMouseEnter={() => { if (!seqActive) { setHoveredId(c.id); onConflictHover?.(c); } }}
+              onMouseLeave={() => { if (!seqActive) { setHoveredId(null); onConflictHover?.(null); } }}
               style={{
                 position: "absolute", top: isHovered ? -4 : 0,
                 left: `${left}%`, width: `${right - left}%`,
@@ -1093,7 +1402,7 @@ function ConflictScrubber({ onConflictHover }) {
           const left = getPosition(c.start);
           const right = getPosition(c.end);
           const center = (left + right) / 2;
-          const isHovered = hoveredId === c.id;
+          const isHovered = isHot(c);
 
           // Get price during conflict
           const duringPrices = NATIONAL_MONTHLY.filter(d => d.date >= c.start && d.date <= c.end);
@@ -1105,7 +1414,7 @@ function ConflictScrubber({ onConflictHover }) {
               style={{
                 position: "absolute", left: `${center}%`, transform: "translateX(-50%)",
                 textAlign: "center", transition: "all 0.3s ease",
-                opacity: hoveredId === null || isHovered ? 1 : 0.3,
+                opacity: isHovered ? 1 : ((hoveredId != null || (seqActive && seqIdx >= 0)) ? 0.3 : 1),
               }}
             >
               <div style={{
@@ -1138,6 +1447,7 @@ function ConflictScrubber({ onConflictHover }) {
 
 // ── Oil Flow Sankey-style visual ──
 function OilFlowDiagram({ year }) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const svgRef = useRef(null);
   const sources = IMPORT_SOURCES_TIMELINE[year] || IMPORT_SOURCES_TIMELINE["2025"];
   const entries = Object.entries(sources).filter(([k]) => k !== "Other").sort((a, b) => b[1] - a[1]);
@@ -1184,17 +1494,18 @@ function OilFlowDiagram({ year }) {
       path.bezierCurveTo(midX, rightYOff + rightH, midX, src.y + src.height, leftX + 80, src.y + src.height);
       path.closePath();
 
-      flows.append("path")
+      const flowPath = flows.append("path")
         .attr("d", path.toString())
         .attr("fill", color)
-        .attr("opacity", 0)
-        .transition()
-        .delay(i * 120)
-        .duration(600)
-        .attr("opacity", 0.35);
+        .attr("opacity", 0);
+      if (reducedMotion) {
+        flowPath.attr("opacity", 0.35);
+      } else {
+        flowPath.transition().delay(i * 120).duration(600).attr("opacity", 0.35);
+      }
 
       // Source label
-      svg.append("text")
+      const nameEl = svg.append("text")
         .attr("x", leftX + 74)
         .attr("y", src.midY + 1)
         .attr("text-anchor", "end")
@@ -1203,11 +1514,12 @@ function OilFlowDiagram({ year }) {
         .attr("font-family", FONT)
         .attr("font-weight", 500)
         .text(src.name)
-        .attr("opacity", 0)
-        .transition().delay(i * 120 + 200).duration(400).attr("opacity", 1);
+        .attr("opacity", 0);
+      if (reducedMotion) nameEl.attr("opacity", 1);
+      else nameEl.transition().delay(i * 120 + 200).duration(400).attr("opacity", 1);
 
       // Percentage
-      svg.append("text")
+      const pctEl = svg.append("text")
         .attr("x", leftX + 74)
         .attr("y", src.midY + 14)
         .attr("text-anchor", "end")
@@ -1216,14 +1528,15 @@ function OilFlowDiagram({ year }) {
         .attr("font-family", FONT)
         .attr("font-weight", 700)
         .text(`${src.pct}%`)
-        .attr("opacity", 0)
-        .transition().delay(i * 120 + 300).duration(400).attr("opacity", 1);
+        .attr("opacity", 0);
+      if (reducedMotion) pctEl.attr("opacity", 1);
+      else pctEl.transition().delay(i * 120 + 300).duration(400).attr("opacity", 1);
 
       rightYOff += rightH;
     });
 
     // US destination label
-    svg.append("text")
+    const usEl = svg.append("text")
       .attr("x", rightX - 70)
       .attr("y", usY + usH / 2 - 8)
       .attr("text-anchor", "start")
@@ -1232,10 +1545,11 @@ function OilFlowDiagram({ year }) {
       .attr("font-family", FONT)
       .attr("font-weight", 700)
       .text("U.S.")
-      .attr("opacity", 0)
-      .transition().delay(800).duration(500).attr("opacity", 1);
+      .attr("opacity", 0);
+    if (reducedMotion) usEl.attr("opacity", 1);
+    else usEl.transition().delay(800).duration(500).attr("opacity", 1);
 
-    svg.append("text")
+    const refEl = svg.append("text")
       .attr("x", rightX - 70)
       .attr("y", usY + usH / 2 + 10)
       .attr("text-anchor", "start")
@@ -1243,8 +1557,9 @@ function OilFlowDiagram({ year }) {
       .attr("font-size", "11px")
       .attr("font-family", FONT)
       .text("Refineries")
-      .attr("opacity", 0)
-      .transition().delay(900).duration(500).attr("opacity", 1);
+      .attr("opacity", 0);
+    if (reducedMotion) refEl.attr("opacity", 1);
+    else refEl.transition().delay(900).duration(500).attr("opacity", 1);
 
     // Year label
     svg.append("text")
@@ -1253,10 +1568,10 @@ function OilFlowDiagram({ year }) {
       .attr("fill", TEXT_DIM).attr("font-size", "11px").attr("font-family", FONT)
       .text(`Crude oil import share, ${year}`);
 
-  }, [year]);
+  }, [year, reducedMotion]);
 
   return (
-    <div style={{ width: "100%" }}>
+    <div style={{ width: "100%" }} role="img" aria-label={`Crude oil import flows into the U.S. for ${year}`}>
       <svg ref={svgRef} style={{ width: "100%", height: "auto" }} />
     </div>
   );
@@ -1379,7 +1694,32 @@ function PocketImpact({ stateCode, conflict }) {
   );
 }
 
-function ScenarioInput({ onSubmit, mobile }) {
+function ForecastChartPreview() {
+  return (
+    <div style={{ width: "100%", marginTop: 20 }} aria-hidden="true">
+      <svg viewBox="0 0 800 360" style={{ width: "100%", height: "auto", display: "block" }} preserveAspectRatio="xMidYMid meet">
+        <rect width="800" height="360" fill={BG_CARD} rx="12" />
+        <path
+          d="M56,300 L120,260 L220,240 L340,200 L480,180 L620,140 L744,120"
+          fill="none"
+          stroke={ACCENT}
+          strokeWidth="2.5"
+          opacity={0.45}
+        />
+        <path
+          d="M56,290 L744,250"
+          fill="none"
+          stroke={TEXT_DIM}
+          strokeWidth="1.5"
+          strokeDasharray="5 5"
+          opacity={0.35}
+        />
+      </svg>
+    </div>
+  );
+}
+
+function ScenarioInput({ onSubmit, mobile, loading = false }) {
   const [inputText, setInputText] = useState("");
   const [foc, setFoc] = useState(false);
   const presets = [
@@ -1407,18 +1747,21 @@ function ScenarioInput({ onSubmit, mobile }) {
         based on patterns from 35 years of historical data.
       </p>
       <textarea
+        aria-label="Describe a hypothetical future event to simulate its impact on gas prices"
         value={inputText}
         onChange={(e) => setInputText(e.target.value)}
         onFocus={() => setFoc(true)}
         onBlur={() => setFoc(false)}
         placeholder={"e.g. 'Major war in the Middle East starting June 2027' or 'OPEC cuts production by 3 million barrels in 2028'"}
         rows={2}
+        disabled={loading}
         style={{
           width: "100%", boxSizing: "border-box", resize: "none",
           background: BG_CARD, borderWidth: 1, borderStyle: "solid",
           borderColor: foc ? ACCENT : BORDER, borderRadius: 12, padding: 16,
           color: TEXT_BRIGHT, fontSize: 15, fontFamily: FONT, outline: "none",
           transition: "border-color 0.2s",
+          opacity: loading ? 0.6 : 1,
         }}
       />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
@@ -1426,6 +1769,8 @@ function ScenarioInput({ onSubmit, mobile }) {
           <button
             key={p.label}
             type="button"
+            aria-label={`Use preset scenario: ${p.label}`}
+            disabled={loading}
             onClick={() => runPreset(p.text)}
             style={{
               padding: "6px 14px", borderRadius: 8, borderWidth: 1, borderStyle: "solid", borderColor: BORDER,
@@ -1442,17 +1787,18 @@ function ScenarioInput({ onSubmit, mobile }) {
       <div style={{ marginTop: 16 }}>
         <button
           type="button"
-          disabled={inputText.length <= 5}
+          aria-label={loading ? "Running scenario" : "Run scenario forecast"}
+          disabled={inputText.length <= 5 || loading}
           onClick={() => onSubmit(inputText)}
           style={{
             padding: "10px 28px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700, fontFamily: FONT,
-            cursor: inputText.length > 5 ? "pointer" : "not-allowed",
-            opacity: inputText.length > 5 ? 1 : 0.45,
+            cursor: inputText.length > 5 && !loading ? "pointer" : "not-allowed",
+            opacity: loading || inputText.length > 5 ? 1 : 0.45,
             background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_WARM})`,
             color: "#fff", transition: "all 0.2s",
           }}
         >
-          Run Scenario
+          {loading ? "Running…" : "Run Scenario"}
         </button>
       </div>
     </div>
@@ -1534,6 +1880,8 @@ function ForecastResults({ forecast, classification, mobile }) {
       </div>
       <button
         type="button"
+        aria-expanded={methOpen}
+        aria-label="How this forecast was generated"
         onClick={() => setMethOpen(!methOpen)}
         style={{
           width: "100%", textAlign: "left", padding: "12px 16px", borderRadius: 12,
@@ -1564,6 +1912,7 @@ function ForecastResults({ forecast, classification, mobile }) {
 }
 
 function ForecastChart({ forecast, mobile }) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const svgRef = useRef(null);
   const tooltipRef = useRef(null);
   const uid = useId().replace(/:/g, "");
@@ -1713,12 +2062,16 @@ function ForecastChart({ forecast, mobile }) {
       .attr("stroke-width", 2.5)
       .attr("d", lineS);
     const totalLen = pathS.node().getTotalLength();
-    pathS.attr("stroke-dasharray", totalLen)
-      .attr("stroke-dashoffset", totalLen)
-      .transition()
-      .duration(1600)
-      .ease(d3.easeCubicOut)
-      .attr("stroke-dashoffset", 0);
+    if (reducedMotion) {
+      pathS.attr("stroke-dasharray", null).attr("stroke-dashoffset", 0);
+    } else {
+      pathS.attr("stroke-dasharray", totalLen)
+        .attr("stroke-dashoffset", totalLen)
+        .transition()
+        .duration(1600)
+        .ease(d3.easeCubicOut)
+        .attr("stroke-dashoffset", 0);
+    }
 
     const pk = scenPts.find((p) => p.date === forecast.peakDate) || scenPts[scenPts.length - 1];
     svg.append("circle")
@@ -1810,11 +2163,15 @@ function ForecastChart({ forecast, mobile }) {
     return () => {
       svg.selectAll("*").remove();
     };
-  }, [forecast, mobile, resizeT, uid]);
+  }, [forecast, mobile, resizeT, uid, reducedMotion]);
 
   if (!forecast) return null;
   return (
-    <div style={{ position: "relative", width: "100%", marginTop: 20 }}>
+    <div
+      role="img"
+      aria-label="Forecast chart showing baseline gas price, scenario projection, and confidence band"
+      style={{ position: "relative", width: "100%", marginTop: 20 }}
+    >
       <svg ref={svgRef} style={{ width: "100%", height: "auto", display: "block" }} />
       <div
         ref={tooltipRef}
@@ -1829,9 +2186,34 @@ function ForecastChart({ forecast, mobile }) {
   );
 }
 
-function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRange = null }) {
+function PriceChart({
+  highlightConflict = null,
+  highlightConflicts = null,
+  showAllConflicts = true,
+  dateRange = null,
+  guidedTour = false,
+}) {
+  const reducedMotion = useContext(ReducedMotionContext);
   const svgRef = useRef(null);
   const tooltipRef = useRef(null);
+  const wrapRef = useRef(null);
+  const guidedDoneRef = useRef(false);
+  const tourTimersRef = useRef([]);
+  const chartScalesRef = useRef(null);
+  const [chartReady, setChartReady] = useState(false);
+  const [tourPhase, setTourPhase] = useState(guidedTour ? "pending" : "done");
+  const [tourIndex, setTourIndex] = useState(-1);
+  const [tourDone, setTourDone] = useState(!guidedTour);
+  const [overlay, setOverlay] = useState(null);
+
+  useEffect(() => {
+    if (!guidedTour || !reducedMotion) return;
+    guidedDoneRef.current = true;
+    setTourPhase("done");
+    setTourIndex(-1);
+    setTourDone(true);
+    setOverlay(null);
+  }, [guidedTour, reducedMotion]);
 
   const data = useMemo(() => {
     let filtered = NATIONAL_MONTHLY;
@@ -1841,8 +2223,57 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
     return filtered.map(d => ({ ...d, dateObj: parseDate(d.date) }));
   }, [dateRange]);
 
+  const conflictsForBands = useMemo(() => {
+    if (showAllConflicts) return CONFLICTS;
+    if (highlightConflicts && highlightConflicts.length > 0) return highlightConflicts.filter(Boolean);
+    if (highlightConflict) return [highlightConflict];
+    return [];
+  }, [showAllConflicts, highlightConflicts, highlightConflict]);
+
+  useEffect(() => {
+    if (!guidedTour) {
+      setTourPhase("done");
+      setTourIndex(-1);
+      setTourDone(true);
+      setOverlay(null);
+      return;
+    }
+    if (guidedDoneRef.current) {
+      setTourPhase("done");
+      setTourIndex(-1);
+      setTourDone(true);
+      setOverlay(null);
+      return;
+    }
+    setTourPhase("pending");
+    setTourIndex(-1);
+    setTourDone(false);
+    setOverlay(null);
+  }, [guidedTour]);
+
+  useEffect(() => {
+    if (!wrapRef.current || !guidedTour || guidedDoneRef.current) return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        if (!e.isIntersecting && tourPhase === "tour") {
+          tourTimersRef.current.forEach(clearTimeout);
+          tourTimersRef.current = [];
+          guidedDoneRef.current = true;
+          setTourPhase("done");
+          setTourIndex(-1);
+          setTourDone(true);
+          setOverlay(null);
+        }
+      },
+      { threshold: 0.08 }
+    );
+    obs.observe(wrapRef.current);
+    return () => obs.disconnect();
+  }, [guidedTour, tourPhase]);
+
   useEffect(() => {
     if (!svgRef.current || data.length === 0) return;
+    setChartReady(false);
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
@@ -1861,19 +2292,24 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
       .domain([0, d3.max(data, d => d.price) * 1.12])
       .range([height - margin.bottom, margin.top]);
 
-    // Conflict bands
-    const conflicts = showAllConflicts ? CONFLICTS : (highlightConflict ? [highlightConflict] : []);
-    conflicts.forEach(c => {
+    chartScalesRef.current = { x, y, width, height, margin };
+
+    const showStaticAnnotations = !guidedTour || tourDone;
+
+    conflictsForBands.forEach((c) => {
       const x0 = x(parseDate(c.start));
       const x1 = x(parseDate(c.end));
       if (x1 < margin.left || x0 > width - margin.right) return;
+      const twoCmp = highlightConflicts && highlightConflicts.filter(Boolean).length >= 2;
+      const hiOne = highlightConflict && !showAllConflicts && (!highlightConflicts || highlightConflicts.length === 0);
+      const op = showAllConflicts ? 0.08 : (twoCmp || hiOne ? 0.16 : 0.12);
       svg.append("rect")
         .attr("x", Math.max(x0, margin.left))
         .attr("y", margin.top)
         .attr("width", Math.min(x1, width - margin.right) - Math.max(x0, margin.left))
         .attr("height", height - margin.top - margin.bottom)
         .attr("fill", c.color)
-        .attr("opacity", highlightConflict && c.id === highlightConflict.id ? 0.18 : 0.08);
+        .attr("opacity", op);
 
       if (x1 - x0 > 30) {
         svg.append("text")
@@ -1942,10 +2378,9 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
       .attr("stroke-dashoffset", 0);
 
     // ── Annotations ──
-    if (showAllConflicts && width > 500) {
+    if (showStaticAnnotations && showAllConflicts && width > 500) {
       const annotGroup = svg.append("g").attr("class", "annotations");
       const isMobileWidth = width < 700;
-      // Filter to avoid overlap: on smaller screens show fewer
       const anns = isMobileWidth
         ? ANNOTATIONS.filter(a => ["2008-07", "2020-04", "2022-06", "2026-03"].includes(a.date))
         : ANNOTATIONS;
@@ -2022,6 +2457,30 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
       .attr("stroke", TEXT_DIM).attr("stroke-width", 1).attr("stroke-dasharray", "3,3");
     focus.append("circle").attr("r", 5).attr("fill", ACCENT).attr("stroke", BG).attr("stroke-width", 2);
 
+    const updateTip = (mx, my) => {
+      const date = x.invert(mx);
+      const bisect = d3.bisector(d => d.dateObj).left;
+      const i = bisect(data, date, 1);
+      const d0 = data[i - 1], d1 = data[i];
+      if (!d0 || !d1) return;
+      const d = date - d0.dateObj > d1.dateObj - date ? d1 : d0;
+      focus.style("display", null);
+      focus.select("circle").attr("cx", x(d.dateObj)).attr("cy", y(d.price));
+      focus.select(".focus-line").attr("x1", x(d.dateObj)).attr("x2", x(d.dateObj));
+      if (tooltipRef.current) {
+        const conflict = CONFLICTS.find(c => d.date >= c.start && d.date <= c.end);
+        tooltipRef.current.style.display = "block";
+        tooltipRef.current.style.left = `${x(d.dateObj)}px`;
+        const ty = typeof my === "number" ? my : y(d.price);
+        tooltipRef.current.style.top = `${Math.min(ty - 48, y(d.price) - 12)}px`;
+        tooltipRef.current.innerHTML = `
+          <div style="font-size:11px;color:${TEXT_DIM}">${fmtDate(d.date)}</div>
+          <div style="font-size:16px;font-weight:700;color:${TEXT_BRIGHT}">${fmtPrice(d.price)}/gal</div>
+          ${conflict ? `<div style="font-size:10px;color:${conflict.color};margin-top:2px">▎ ${conflict.name}</div>` : ""}
+        `;
+      }
+    };
+
     svg.append("rect")
       .attr("x", margin.left).attr("y", margin.top)
       .attr("width", width - margin.left - margin.right)
@@ -2029,37 +2488,162 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
       .attr("fill", "transparent")
       .on("mousemove", (event) => {
         const [mx] = d3.pointer(event);
-        const date = x.invert(mx);
-        const bisect = d3.bisector(d => d.dateObj).left;
-        const i = bisect(data, date, 1);
-        const d0 = data[i - 1], d1 = data[i];
-        if (!d0 || !d1) return;
-        const d = date - d0.dateObj > d1.dateObj - date ? d1 : d0;
-        focus.style("display", null);
-        focus.select("circle").attr("cx", x(d.dateObj)).attr("cy", y(d.price));
-        focus.select(".focus-line").attr("x1", x(d.dateObj)).attr("x2", x(d.dateObj));
-        if (tooltipRef.current) {
-          const conflict = CONFLICTS.find(c => d.date >= c.start && d.date <= c.end);
-          tooltipRef.current.style.display = "block";
-          tooltipRef.current.style.left = `${x(d.dateObj)}px`;
-          tooltipRef.current.style.top = `${y(d.price) - 12}px`;
-          tooltipRef.current.innerHTML = `
-            <div style="font-size:11px;color:${TEXT_DIM}">${fmtDate(d.date)}</div>
-            <div style="font-size:16px;font-weight:700;color:${TEXT_BRIGHT}">${fmtPrice(d.price)}/gal</div>
-            ${conflict ? `<div style="font-size:10px;color:${conflict.color};margin-top:2px">▎ ${conflict.name}</div>` : ""}
-          `;
-        }
+        updateTip(mx);
       })
       .on("mouseleave", () => {
         focus.style("display", "none");
         if (tooltipRef.current) tooltipRef.current.style.display = "none";
+      })
+      .on("touchstart", (event) => {
+        event.preventDefault();
+        const [mx, my] = d3.pointer(event);
+        updateTip(mx, my);
+      }, { passive: false })
+      .on("touchmove", (event) => {
+        event.preventDefault();
+        const [mx, my] = d3.pointer(event);
+        updateTip(mx, my);
+      }, { passive: false })
+      .on("touchend", () => {
+        setTimeout(() => {
+          focus.style("display", "none");
+          if (tooltipRef.current) tooltipRef.current.style.display = "none";
+        }, 2000);
       });
 
-  }, [data, highlightConflict, showAllConflicts]);
+    const t = setTimeout(() => setChartReady(true), 80);
+    return () => {
+      clearTimeout(t);
+      svg.selectAll("*").remove();
+      chartScalesRef.current = null;
+    };
+  }, [data, highlightConflict, highlightConflicts, showAllConflicts, conflictsForBands, guidedTour, tourDone, reducedMotion]);
+
+  useEffect(() => {
+    if (!svgRef.current || !chartReady) return;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll(".guided-layer").remove();
+    if (!guidedTour || tourPhase !== "tour" || tourIndex < 0 || tourIndex >= GUIDED_ANNOTATIONS.length) {
+      setOverlay(null);
+      return;
+    }
+    const sc = chartScalesRef.current;
+    if (!sc) return;
+    const { x, y, width, height } = sc;
+    const ga = GUIDED_ANNOTATIONS[tourIndex];
+    const annDate = parseDate(ga.date);
+    const bisect = d3.bisector(d => d.dateObj).left;
+    const idx = bisect(data, annDate, 1);
+    const dp = data[Math.min(idx, data.length - 1)];
+    if (!dp) {
+      setOverlay(null);
+      return;
+    }
+    const cx = x(dp.dateObj);
+    const cy = y(ga.price != null ? ga.price : dp.price);
+    const g = svg.append("g").attr("class", "guided-layer");
+    const pulse = g.append("circle")
+      .attr("cx", cx)
+      .attr("cy", cy)
+      .attr("r", 12)
+      .attr("fill", ACCENT)
+      .attr("opacity", 0.2);
+    if (!reducedMotion) {
+      pulse.append("animate")
+        .attr("attributeName", "r")
+        .attr("values", "8;18;8")
+        .attr("dur", "1.4s")
+        .attr("repeatCount", "indefinite");
+    }
+    g.append("circle")
+      .attr("cx", cx)
+      .attr("cy", cy)
+      .attr("r", 5)
+      .attr("fill", ACCENT)
+      .attr("stroke", BG)
+      .attr("stroke-width", 2);
+    const pctLeft = (cx / width) * 100;
+    const pctTop = (cy / height) * 100;
+    setOverlay({
+      leftPct: Math.min(88, Math.max(12, pctLeft)),
+      topPct: Math.min(78, Math.max(8, pctTop - 18)),
+      label: ga.label,
+      insight: ga.insight,
+      dateStr: fmtDate(dp.date),
+      price: ga.price != null ? ga.price : dp.price,
+    });
+    return () => {
+      svg.selectAll(".guided-layer").remove();
+    };
+  }, [guidedTour, tourPhase, tourIndex, chartReady, data, reducedMotion]);
+
+  useEffect(() => {
+    if (!guidedTour || guidedDoneRef.current || reducedMotion) return;
+    tourTimersRef.current.forEach(clearTimeout);
+    tourTimersRef.current = [];
+    if (tourPhase !== "pending") return;
+    const t1 = setTimeout(() => {
+      setTourPhase("tour");
+      setTourIndex(0);
+    }, 2800);
+    tourTimersRef.current.push(t1);
+    return () => { clearTimeout(t1); };
+  }, [guidedTour, tourPhase, reducedMotion]);
+
+  useEffect(() => {
+    if (!guidedTour || tourPhase !== "tour" || tourIndex < 0 || reducedMotion) return;
+    tourTimersRef.current.forEach(clearTimeout);
+    tourTimersRef.current = [];
+    const t = setTimeout(() => {
+      if (tourIndex + 1 >= GUIDED_ANNOTATIONS.length) {
+        guidedDoneRef.current = true;
+        setTourPhase("done");
+        setTourIndex(-1);
+        setTourDone(true);
+        setOverlay(null);
+      } else {
+        setTourIndex(tourIndex + 1);
+      }
+    }, 3200);
+    tourTimersRef.current.push(t);
+    return () => clearTimeout(t);
+  }, [guidedTour, tourPhase, tourIndex, reducedMotion]);
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
-      <svg ref={svgRef} style={{ width: "100%", height: "auto" }} />
+    <div
+      ref={wrapRef}
+      role="img"
+      aria-label="Gas price timeline chart from 1990 to 2026 showing 8 conflict periods"
+      style={{ position: "relative", width: "100%" }}
+    >
+      {!chartReady && <ChartSkeleton h={Math.min(420, 380)} />}
+      <div style={{ display: chartReady ? "block" : "none" }}>
+        <svg ref={svgRef} style={{ width: "100%", height: "auto" }} />
+      </div>
+      {overlay && guidedTour && (
+        <div style={{
+          position: "absolute",
+          left: `${overlay.leftPct}%`,
+          top: `${overlay.topPct}%`,
+          transform: "translate(-50%, -100%)",
+          maxWidth: 280,
+          padding: "12px 14px",
+          background: BG_CARD,
+          border: `1px solid ${ACCENT}55`,
+          borderRadius: 12,
+          boxShadow: `0 8px 32px rgba(0,0,0,0.45)`,
+          pointerEvents: "none",
+          zIndex: 5,
+          transition: "opacity 0.4s ease",
+        }}
+        >
+          <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>
+            {overlay.dateStr} · {overlay.label}
+          </div>
+          <div style={{ fontSize: 13, color: TEXT_BRIGHT, lineHeight: 1.45, marginBottom: 6 }}>{overlay.insight}</div>
+          <div style={{ fontSize: 16, fontFamily: DISPLAY_FONT, fontWeight: 800, color: ACCENT }}>${overlay.price.toFixed(2)}/gal</div>
+        </div>
+      )}
       <div
         ref={tooltipRef}
         style={{
@@ -2067,6 +2651,7 @@ function PriceChart({ highlightConflict = null, showAllConflicts = true, dateRan
           background: BG_CARD, border: `1px solid ${BORDER}`, borderRadius: 8,
           padding: "8px 12px", transform: "translate(-50%, -100%)",
           boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          zIndex: 6,
         }}
       />
     </div>
@@ -2089,7 +2674,10 @@ function RegionChart({ conflictId }) {
   const preStr = `${preStart.getFullYear()}-${String(preStart.getMonth()+1).padStart(2,"0")}`;
   const postStr = `${postEnd.getFullYear()}-${String(postEnd.getMonth()+1).padStart(2,"0")}`;
 
-  const relevantNational = NATIONAL_MONTHLY.filter(d => d.date >= preStr && d.date <= postStr);
+  const relevantNational = useMemo(
+    () => NATIONAL_MONTHLY.filter((d) => d.date >= preStr && d.date <= postStr),
+    [preStr, postStr]
+  );
 
   useEffect(() => {
     if (!canvasRef.current || relevantNational.length === 0) return;
@@ -2149,10 +2737,10 @@ function RegionChart({ conflictId }) {
     });
 
     return () => { if (chartRef.current) chartRef.current.destroy(); };
-  }, [conflictId]);
+  }, [conflictId, relevantNational]);
 
   return (
-    <div style={{ height: 340, position: "relative" }}>
+    <div style={{ height: 340, position: "relative" }} role="img" aria-label="Regional gas price comparison chart by PADD district">
       <canvas ref={canvasRef} />
     </div>
   );
@@ -2301,7 +2889,7 @@ function ImportDonut({ year }) {
         </div>
 
         {/* Right: donut chart */}
-        <div style={{ height: 280, position: "relative" }}>
+        <div style={{ height: 280, position: "relative" }} role="img" aria-label={`U.S. crude oil import shares by country for ${year}`}>
           <canvas ref={canvasRef} />
         </div>
       </div>
@@ -2312,6 +2900,7 @@ function ImportDonut({ year }) {
 // ── Volatility sparklines ──
 function VolatilityBars({ conflictId }) {
   const mobile = useIsMobile();
+  const reducedMotion = useContext(ReducedMotionContext);
   const conflict = CONFLICTS.find(c => c.id === conflictId) || CONFLICTS[CONFLICTS.length - 1];
   const startDate = parseDate(conflict.start);
   const preStart = new Date(startDate);
@@ -2370,8 +2959,8 @@ function VolatilityBars({ conflictId }) {
               height: "100%",
               background: r.pct > 0 ? `linear-gradient(90deg, ${ACCENT}88, ${ACCENT})` : `linear-gradient(90deg, #16a34a88, #16a34a)`,
               borderRadius: 4,
-              transition: "width 0.8s ease",
-              transitionDelay: `${i * 0.1}s`,
+              transition: reducedMotion ? "none" : "width 0.8s ease",
+              transitionDelay: reducedMotion ? 0 : `${i * 0.1}s`,
             }} />
           </div>
           <div style={{ width: 60, fontSize: 13, fontWeight: 600, color: r.pct > 0 ? ACCENT : "#16a34a", textAlign: "right" }}>
@@ -2563,37 +3152,103 @@ function LocalInsights({ stateCode, conflict }) {
 }
 
 // ── State Selector (searchable dropdown) ──
-function StateSelector({ value, onChange }) {
+function StateSelector({ value, onChange, bottomSheet = false, extraFilter = "" }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef(null);
   const inputRef = useRef(null);
+  const listboxId = useId().replace(/:/g, "");
+  const triggerId = useId().replace(/:/g, "");
 
-  // Close on click outside
   useEffect(() => {
+    if (bottomSheet) return;
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [bottomSheet]);
 
-  // Auto-focus search when opening
   useEffect(() => {
     if (open && inputRef.current) inputRef.current.focus();
   }, [open]);
 
+  const ef = (extraFilter || "").trim().toLowerCase();
   const filtered = Object.entries(STATE_DATA)
-    .filter(([code, st]) => st.name.toLowerCase().includes(search.toLowerCase()) || code.toLowerCase().includes(search.toLowerCase()))
+    .filter(([code, st]) => {
+      const q = search.toLowerCase();
+      const matchSearch = st.name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
+      const matchExtra = !ef || st.name.toLowerCase().includes(ef) || code.toLowerCase().includes(ef);
+      return matchSearch && matchExtra;
+    })
     .sort((a, b) => a[1].name.localeCompare(b[1].name));
 
   const selected = value ? STATE_DATA[value] : null;
 
+  const listInner = (
+    <>
+      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${BORDER}` }}>
+        <input
+          ref={inputRef}
+          aria-label="Search states"
+          placeholder="Search states..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: "100%", padding: "10px 14px", borderRadius: 8,
+            background: BG, border: `1px solid ${BORDER}`, color: TEXT_BRIGHT,
+            fontSize: 13, fontFamily: FONT, outline: "none", boxSizing: "border-box",
+            transition: "border-color 0.2s",
+          }}
+          onFocus={(e) => { e.target.style.borderColor = ACCENT; }}
+          onBlur={(e) => { e.target.style.borderColor = BORDER; }}
+        />
+      </div>
+      <div
+        id={listboxId}
+        role="listbox"
+        aria-label="Select your state"
+        style={{ overflowY: "auto", maxHeight: bottomSheet ? "42vh" : 280, WebkitOverflowScrolling: "touch" }}
+      >
+        {filtered.map(([code, st]) => (
+          <button
+            key={code}
+            type="button"
+            role="option"
+            aria-selected={code === value}
+            onClick={() => { onChange(code); setOpen(false); setSearch(""); }}
+            style={{
+              width: "100%", padding: "14px 18px", border: "none",
+              background: code === value ? `${ACCENT}15` : "transparent",
+              color: code === value ? ACCENT : TEXT, fontSize: 14, fontFamily: FONT,
+              cursor: "pointer", textAlign: "left", display: "flex",
+              alignItems: "center", justifyContent: "space-between",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => { if (code !== value) e.target.style.background = "#252525"; }}
+            onMouseLeave={(e) => { if (code !== value) e.target.style.background = "transparent"; }}
+          >
+            <span>{st.name}</span>
+            <span style={{ fontSize: 11, color: TEXT_DIM }}>{PADD_NAMES[st.padd].split(" (")[0]}</span>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ padding: "20px", textAlign: "center", color: TEXT_DIM, fontSize: 13 }}>No states found</div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div ref={ref} style={{ width: "100%", maxWidth: 420 }}>
-      {/* Trigger button */}
       <button
+        type="button"
+        id={triggerId}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-label="Select your state"
         onClick={() => { setOpen(!open); if (open) setSearch(""); }}
         style={{
-          width: "100%", padding: "14px 18px", borderRadius: open ? "12px 12px 0 0" : 12,
+          width: "100%", padding: "14px 18px", borderRadius: open && !bottomSheet ? "12px 12px 0 0" : 12,
           background: BG_CARD,
           borderLeft: `1px solid ${open ? ACCENT : BORDER}`,
           borderRight: `1px solid ${open ? ACCENT : BORDER}`,
@@ -2612,71 +3267,116 @@ function StateSelector({ value, onChange }) {
         }}>▼</span>
       </button>
 
-      {/* Inline expanding panel */}
-      <div style={{
-        maxHeight: open ? 360 : 0,
-        opacity: open ? 1 : 0,
-        overflow: "hidden",
-        transition: "max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease",
-        background: BG_CARD,
-        borderLeft: open ? `1px solid ${ACCENT}` : "1px solid transparent",
-        borderRight: open ? `1px solid ${ACCENT}` : "1px solid transparent",
-        borderBottom: open ? `1px solid ${ACCENT}` : "1px solid transparent",
-        borderTop: "none",
-        borderRadius: "0 0 12px 12px",
-      }}>
-        {/* Search input */}
-        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${BORDER}` }}>
-          <input
-            ref={inputRef}
-            placeholder="Search states..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+      {bottomSheet && open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setOpen(false)}
             style={{
-              width: "100%", padding: "10px 14px", borderRadius: 8,
-              background: BG, border: `1px solid ${BORDER}`, color: TEXT_BRIGHT,
-              fontSize: 13, fontFamily: FONT, outline: "none", boxSizing: "border-box",
-              transition: "border-color 0.2s",
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 400,
+              border: "none", cursor: "pointer", padding: 0,
             }}
-            onFocus={e => e.target.style.borderColor = ACCENT}
-            onBlur={e => e.target.style.borderColor = BORDER}
           />
-        </div>
+          <div style={{
+            position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 401,
+            background: BG_CARD,
+            borderTop: `1px solid ${ACCENT}`,
+            borderRadius: "16px 16px 0 0",
+            paddingBottom: "max(12px, env(safe-area-inset-bottom))",
+            maxHeight: "72vh",
+            display: "flex", flexDirection: "column",
+            boxShadow: "0 -12px 40px rgba(0,0,0,0.5)",
+          }}>
+            <div style={{
+              padding: "12px 16px", borderBottom: `1px solid ${BORDER}`,
+              fontWeight: 700, color: TEXT_BRIGHT, fontSize: 14, fontFamily: DISPLAY_FONT,
+            }}>
+              Select your state
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              {listInner}
+            </div>
+          </div>
+        </>
+      )}
 
-        {/* State list */}
-        <div style={{ overflowY: "auto", maxHeight: 280 }}>
-          {filtered.map(([code, st]) => (
-            <button
-              key={code}
-              onClick={() => { onChange(code); setOpen(false); setSearch(""); }}
-              style={{
-                width: "100%", padding: "11px 18px", border: "none",
-                background: code === value ? `${ACCENT}15` : "transparent",
-                color: code === value ? ACCENT : TEXT, fontSize: 13, fontFamily: FONT,
-                cursor: "pointer", textAlign: "left", display: "flex",
-                alignItems: "center", justifyContent: "space-between",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={e => { if (code !== value) e.target.style.background = "#252525"; }}
-              onMouseLeave={e => { if (code !== value) e.target.style.background = "transparent"; }}
-            >
-              <span>{st.name}</span>
-              <span style={{ fontSize: 11, color: TEXT_DIM }}>{PADD_NAMES[st.padd].split(" (")[0]}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div style={{ padding: "20px", textAlign: "center", color: TEXT_DIM, fontSize: 13 }}>No states found</div>
-          )}
+      {!bottomSheet && (
+        <div style={{
+          maxHeight: open ? 360 : 0,
+          opacity: open ? 1 : 0,
+          overflow: "hidden",
+          transition: "max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease",
+          background: BG_CARD,
+          borderLeft: open ? `1px solid ${ACCENT}` : "1px solid transparent",
+          borderRight: open ? `1px solid ${ACCENT}` : "1px solid transparent",
+          borderBottom: open ? `1px solid ${ACCENT}` : "1px solid transparent",
+          borderTop: "none",
+          borderRadius: "0 0 12px 12px",
+        }}
+        >
+          {listInner}
         </div>
-      </div>
+      )}
     </div>
   );
+}
+
+function getExplorerConflictStats(conflict, stData) {
+  const exDuring = NATIONAL_MONTHLY.filter((d) => d.date >= conflict.start && d.date <= conflict.end).map((d) => d.price);
+  const exPreDate = parseDate(conflict.start);
+  exPreDate.setMonth(exPreDate.getMonth() - 6);
+  const exPreStr = `${exPreDate.getFullYear()}-${String(exPreDate.getMonth() + 1).padStart(2, "0")}`;
+  const exPre = NATIONAL_MONTHLY.filter((d) => d.date >= exPreStr && d.date < conflict.start).map((d) => d.price);
+  const exPreAvg = exPre.length ? _.mean(exPre) : 2.5;
+  const exPeakNat = exDuring.length ? _.max(exDuring) : 3.5;
+  const exPctChange = exPreAvg > 0 ? ((exPeakNat - exPreAvg) / exPreAvg * 100) : 0;
+  const exStatePeak = stData ? exPeakNat + stData.offset : null;
+  return { exPreAvg, exPeakNat, exPctChange, exStatePeak };
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: 40, textAlign: "center",
+          fontFamily: "'Libre Franklin', sans-serif", color: "#9a9891",
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 12 }}>Something went wrong</div>
+          <div style={{ fontSize: 14, marginBottom: 20 }}>
+            A visualization failed to render. Try refreshing the page.
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              padding: "8px 24px", borderRadius: 8, border: "1px solid #2a2a28",
+              background: "transparent", color: "#e8e6e3", cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ══════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════
-export default function App() {
+function AppMain() {
+  const reducedMotion = useContext(ReducedMotionContext);
   const [mode, setMode] = useState("story"); // "story" | "explore"
   const [activeConflict, setActiveConflict] = useState(CONFLICTS[CONFLICTS.length - 1]);
   const [importYear, setImportYear] = useState("2024");
@@ -2689,7 +3389,34 @@ export default function App() {
   const [forecastError, setForecastError] = useState(null);
   const [forecastWarning, setForecastWarning] = useState(null);
   const [forecastPanelOpen, setForecastPanelOpen] = useState(false);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [secondConflict, setSecondConflict] = useState(null);
+  const [explorerStateFilter, setExplorerStateFilter] = useState("");
   const mobile = useIsMobile();
+
+  const switchMode = useCallback((newMode) => {
+    if (reducedMotion) {
+      setMode(newMode);
+      window.scrollTo(0, 0);
+      return;
+    }
+    setTransitioning(true);
+    window.setTimeout(() => {
+      setMode(newMode);
+      window.scrollTo(0, 0);
+      window.setTimeout(() => setTransitioning(false), 50);
+    }, 300);
+  }, [reducedMotion]);
+
+  useEffect(() => {
+    if (mode === "story") {
+      setCompareMode(false);
+      setSecondConflict(null);
+      setExplorerStateFilter("");
+    }
+  }, [mode]);
 
   // Map conflict to closest import source year
   const conflictToImportYear = useCallback((c) => {
@@ -2704,38 +3431,79 @@ export default function App() {
     setImportYear(conflictToImportYear(c));
   }, [conflictToImportYear]);
 
+  const toggleCompareMode = useCallback(() => {
+    setCompareMode((m) => {
+      if (m) {
+        setSecondConflict(null);
+        return false;
+      }
+      const idx = CONFLICTS.findIndex((c) => c.id === activeConflict.id);
+      const next = CONFLICTS[(idx + 1) % CONFLICTS.length];
+      setSecondConflict(next);
+      return true;
+    });
+  }, [activeConflict]);
+
+  const onExplorerConflictClick = useCallback((c) => {
+    if (!compareMode) {
+      handleConflictChange(c);
+      return;
+    }
+    if (c.id === activeConflict.id) {
+      if (secondConflict) {
+        handleConflictChange(secondConflict);
+        setSecondConflict(activeConflict);
+      }
+      return;
+    }
+    if (secondConflict?.id === c.id) {
+      setSecondConflict(null);
+      return;
+    }
+    if (!secondConflict) {
+      setSecondConflict(c);
+      return;
+    }
+    setSecondConflict(c);
+  }, [compareMode, activeConflict, secondConflict, handleConflictChange]);
+
   const handleForecastSubmit = useCallback((inputText) => {
     setForecastError(null);
     setForecastWarning(null);
-    const classification = classifyScenario(inputText);
-    if (!classification) {
-      setForecastResult(null);
-      setForecastInput(null);
-      setForecastError("noMatch");
-      return;
-    }
-    const eventDate = parseEventDate(inputText);
-    if (isEventBeforeAnchor(eventDate)) {
-      setForecastResult(null);
-      setForecastInput(null);
-      setForecastError("past");
-      return;
-    }
-    const farFuture = eventDate.year >= 2035;
-    setForecastWarning(farFuture ? "farFuture" : null);
-    const result = generateForecast(classification, eventDate, userState, { farFutureBand: farFuture });
-    setForecastInput(inputText);
-    setForecastResult({ ...result, classification });
+    setForecastLoading(true);
+    setForecastResult(null);
+    setForecastInput(null);
+    window.setTimeout(() => {
+      const classification = classifyScenario(inputText);
+      if (!classification) {
+        setForecastResult(null);
+        setForecastInput(null);
+        setForecastError("noMatch");
+        setForecastLoading(false);
+        return;
+      }
+      const eventDate = parseEventDate(inputText);
+      if (isEventBeforeAnchor(eventDate)) {
+        setForecastResult(null);
+        setForecastInput(null);
+        setForecastError("past");
+        setForecastLoading(false);
+        return;
+      }
+      const farFuture = eventDate.year >= 2035;
+      setForecastWarning(farFuture ? "farFuture" : null);
+      const result = generateForecast(classification, eventDate, userState, { farFutureBand: farFuture });
+      setForecastInput(inputText);
+      setForecastResult({ ...result, classification });
+      setForecastLoading(false);
+    }, 600);
   }, [userState]);
 
   const scrollToStoryChapter = useCallback((chapterId) => {
     const el = document.getElementById(chapterId);
     if (!el) return;
-    const yWin = window.scrollY;
-    const topBar = yWin > heroHeight * 0.8 ? 56 : 0;
-    const y = el.getBoundingClientRect().top + yWin - topBar - 12;
-    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
-  }, [heroHeight]);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   useEffect(() => {
     const syncHeroHeight = () => setHeroHeight(window.innerHeight);
@@ -2765,11 +3533,22 @@ export default function App() {
     return () => window.removeEventListener("scroll", onScroll);
   }, [mode, heroHeight]);
 
+  const explorerStats = useMemo(() => {
+    const cfl = activeConflict || CONFLICTS[CONFLICTS.length - 1];
+    const stData = userState ? STATE_DATA[userState] : null;
+    const { exPreAvg, exPeakNat, exPctChange, exStatePeak } = getExplorerConflictStats(cfl, stData);
+    const exStateExtra = stData ? (exPeakNat + stData.offset - (exPreAvg + stData.offset)) * 1200 : null;
+    return { cfl, stData, exPreAvg, exPeakNat, exPctChange, exStatePeak, exStateExtra };
+  }, [activeConflict, userState]);
+
   // ── STORY MODE ──
   if (mode === "story") {
     const sidebarTop = scrollY > heroHeight * 0.8 ? 56 : 22;
     return (
       <div style={{
+        opacity: transitioning ? 0 : 1,
+        transform: transitioning ? "scale(0.98)" : "scale(1)",
+        transition: reducedMotion ? "none" : "opacity 0.3s ease, transform 0.3s ease",
         background: BG, color: TEXT, fontFamily: FONT, minHeight: "100vh",
         paddingLeft: mobile ? 0 : 196,
         boxSizing: "border-box",
@@ -2812,6 +3591,8 @@ export default function App() {
                 <button
                   key={ch.id}
                   type="button"
+                  aria-label={`Jump to story section: ${ch.label}`}
+                  aria-current={active ? "true" : undefined}
                   onClick={() => scrollToStoryChapter(ch.id)}
                   style={{
                     width: "100%",
@@ -2868,7 +3649,9 @@ export default function App() {
             The Price of Conflict
           </span>
           <button
-            onClick={() => { setMode("explore"); window.scrollTo(0, 0); }}
+            type="button"
+            aria-label="Switch to explorer dashboard"
+            onClick={() => switchMode("explore")}
             style={{
               padding: "7px 18px", fontSize: 11, fontWeight: 700, fontFamily: FONT,
               background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_WARM})`,
@@ -2893,7 +3676,7 @@ export default function App() {
         >
           <div style={{
             position: "absolute", inset: 0,
-            background: `radial-gradient(ellipse 60% 50% at 50% 40%, ${ACCENT}12, transparent 70%)`,
+            background: `radial-gradient(ellipse 60% 50% at ${50 + scrollY * 0.02}% ${40 - scrollY * 0.03}%, ${ACCENT}12, transparent 70%)`,
           }} />
           <div style={{ position: "relative", zIndex: 1, textAlign: "center", maxWidth: 800 }}>
             <div style={{
@@ -2922,7 +3705,7 @@ export default function App() {
             <div style={{ marginTop: 36, marginBottom: 28 }}>
               <GasPumpSign price={4.18} />
             </div>
-            <div style={{ marginTop: 48, animation: "bounce 2s ease infinite" }}>
+            <div style={{ marginTop: 48, animation: reducedMotion ? "none" : "bounce 2s ease infinite" }}>
               <div style={{ fontSize: 11, color: TEXT_DIM, letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 }}>
                 Scroll to explore
               </div>
@@ -2934,7 +3717,7 @@ export default function App() {
 
         {/* Hero stat strip */}
         <section
-          id="story-stats"
+          id="main-content"
           style={{
           maxWidth: 960, margin: "0 auto", padding: "20px 24px 60px",
         }}
@@ -2945,15 +3728,15 @@ export default function App() {
               background: BORDER, borderRadius: 16, overflow: "hidden",
             }}>
               {[
-                { label: "Avg. household gas spending", value: "$2,780", sub: "Per year, 2022 (EIA STEO)" },
-                { label: "Factors affecting your price", value: "5+", sub: "Crude oil, refining, transport, taxes, events" },
-                { label: "National average today", value: "$4.18", sub: "Regular grade, March 2026" },
+                { label: "Avg. household gas spending", target: 2780, prefix: "$", suffix: "/yr", sub: "2022, BLS Consumer Expenditure Survey" },
+                { label: "Major disruptions since 1990", target: 8, prefix: "", suffix: " events", sub: "Each adding $380-$4,200 to household costs" },
+                { label: "National average today", target: 4.18, prefix: "$", suffix: "/gal", sub: "Regular grade, March 2026", color: ACCENT },
               ].map((stat, i) => (
                 <div key={i} style={{
                   background: BG_CARD, padding: "24px 20px", textAlign: "center",
                 }}>
-                  <div style={{ fontSize: 32, fontWeight: 800, fontFamily: DISPLAY_FONT, color: i === 2 ? ACCENT : TEXT_BRIGHT }}>
-                    {stat.value}
+                  <div style={{ fontSize: 36, fontWeight: 800, fontFamily: DISPLAY_FONT, color: stat.color || TEXT_BRIGHT }}>
+                    <CountUp target={stat.target} prefix={stat.prefix} suffix={stat.suffix} duration={2200} />
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: TEXT_BRIGHT, marginTop: 4 }}>{stat.label}</div>
                   <div style={{ fontSize: 11, color: TEXT_DIM, marginTop: 2 }}>{stat.sub}</div>
@@ -3002,6 +3785,7 @@ export default function App() {
                     down each factor so you can read the signals behind the price.
                   </p>
                 </div>
+                <PriceBreakdownBar stateCode={userState} />
               </div>
             </div>
           </FadeIn>
@@ -3011,8 +3795,8 @@ export default function App() {
         <section id="story-ch1" style={{ padding: mobile ? "60px 16px" : "80px 24px" }}>
           <div style={{ maxWidth: 960, margin: "0 auto" }}>
             <FadeIn>
-              <div style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>
-                Chapter 01
+              <div style={{ marginBottom: 8 }}>
+                <ChapterCountUp num={1} />
               </div>
               <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 8, lineHeight: 1.1 }}>
                 35 Years of Gas Prices
@@ -3030,15 +3814,20 @@ export default function App() {
           {/* Chart breaks out of the text column */}
           <div style={{ maxWidth: 1100, margin: "0 auto" }}>
             <FadeIn delay={0.15}>
-              <PriceChart showAllConflicts={true} />
+              <PriceChart showAllConflicts={true} guidedTour />
             </FadeIn>
           </div>
           <div style={{ maxWidth: 960, margin: "0 auto" }}>
+            <FadeIn delay={0.18}>
+              <InsightCallout>
+                Since 1990, a major supply disruption has hit U.S. gas prices roughly every 4 years. The average spike lasts 8 months and adds $0.65 to the national average per gallon.
+              </InsightCallout>
+            </FadeIn>
             <FadeIn delay={0.2}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 24, justifyContent: "center" }}>
                 {CONFLICTS.map(c => (
                   <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: TEXT_DIM }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: c.color }} />
+                    <ConflictSparkMini conflict={c} />
                     {c.name}
                   </div>
                 ))}
@@ -3046,7 +3835,7 @@ export default function App() {
             </FadeIn>
             <FadeIn delay={0.25}>
               <div style={{ marginTop: 40 }}>
-                <ConflictScrubber />
+                <ConflictScrubber autoSequence />
               </div>
             </FadeIn>
           </div>
@@ -3124,6 +3913,13 @@ export default function App() {
               <HouseholdCostTicker />
             </FadeIn>
           </div>
+          <FadeIn delay={0.22}>
+            <div style={{ maxWidth: 1060, margin: "32px auto 0", padding: "0 24px" }}>
+              <InsightCallout>
+                The $8,790 cumulative extra cost is equivalent to 6 months of median rent. Most of this ($4,200) came from a single event: the Iraq War period, which lasted 5 years.
+              </InsightCallout>
+            </div>
+          </FadeIn>
         </section>
 
         {/* Regional - chart left, text right on desktop */}
@@ -3136,13 +3932,15 @@ export default function App() {
           }}>
             <FadeIn>
               <div style={{ background: BG_CARD, borderRadius: 16, padding: mobile ? 16 : 24, border: `1px solid ${BORDER}` }}>
-                <RegionChart conflictId="iran-war" />
+                <LazyChartShell height={340}>
+                  <RegionChart conflictId="iran-war" />
+                </LazyChartShell>
               </div>
             </FadeIn>
             <FadeIn delay={0.1}>
               <div style={{ position: mobile ? "static" : "sticky", top: 120 }}>
-                <div style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>
-                  Chapter 02
+                <div style={{ marginBottom: 8 }}>
+                  <ChapterCountUp num={2} />
                 </div>
                 <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: mobile ? 28 : 34, fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 12, lineHeight: 1.15 }}>
                   Why Prices Vary by Region
@@ -3157,14 +3955,21 @@ export default function App() {
               </div>
             </FadeIn>
           </div>
+          <FadeIn delay={0.15}>
+            <div style={{ maxWidth: 1060, margin: "32px auto 0" }}>
+              <InsightCallout>
+                The West Coast pays a structural premium of $0.60-$1.00 per gallon over the Gulf Coast, even in calm markets. During disruptions, this gap widens to over $2.00. Geography, not just taxes, is the primary driver.
+              </InsightCallout>
+            </div>
+          </FadeIn>
         </section>
 
         {/* Supply chain - then vs now narrative */}
         <section id="story-ch3" style={{ padding: "40px 24px 80px" }}>
           <div style={{ maxWidth: 960, margin: "0 auto" }}>
             <FadeIn>
-              <div style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>
-                Chapter 03
+              <div style={{ marginBottom: 8 }}>
+                <ChapterCountUp num={3} />
               </div>
               <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 8, lineHeight: 1.1 }}>
                 Where U.S. Oil Comes From
@@ -3199,7 +4004,9 @@ export default function App() {
                     }}>1991</div>
                     <span style={{ fontSize: 12, color: TEXT_DIM }}>Diversified, Middle East heavy</span>
                   </div>
-                  <OilFlowDiagram year="1991" />
+                  <LazyChartShell height={320}>
+                    <OilFlowDiagram year="1991" />
+                  </LazyChartShell>
                 </div>
                 <div style={{ background: BG_CARD, borderRadius: 16, padding: mobile ? 12 : 20, border: `1px solid ${ACCENT}25` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
@@ -3210,9 +4017,16 @@ export default function App() {
                     }}>2024</div>
                     <span style={{ fontSize: 12, color: TEXT_DIM }}>Canada dominant, pipeline-based</span>
                   </div>
-                  <OilFlowDiagram year="2024" />
+                  <LazyChartShell height={320}>
+                    <OilFlowDiagram year="2024" />
+                  </LazyChartShell>
                 </div>
               </div>
+            </FadeIn>
+            <FadeIn delay={0.15}>
+              <InsightCallout>
+                Despite producing more oil domestically than ever, the U.S. cannot insulate itself from global price shocks. Oil is fungible: a disruption in the Persian Gulf raises prices at every refinery worldwide.
+              </InsightCallout>
             </FadeIn>
             <FadeIn delay={0.2}>
               <p style={{
@@ -3233,8 +4047,8 @@ export default function App() {
         <section id="story-ch4" style={{ maxWidth: 960, margin: "0 auto", padding: "40px 24px 80px" }}>
           <FadeIn>
             <div style={{ textAlign: "center", marginBottom: 32 }}>
-              <div style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>
-                Chapter 04
+              <div style={{ marginBottom: 8 }}>
+                <ChapterCountUp num={4} />
               </div>
               <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 700, color: TEXT_BRIGHT, marginBottom: 12, lineHeight: 1.1 }}>
                 Your Local Price Picture
@@ -3246,20 +4060,54 @@ export default function App() {
                 depending on where you live.
               </p>
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <StateSelector value={userState} onChange={setUserState} />
+                <StateSelector value={userState} onChange={setUserState} bottomSheet={mobile} />
               </div>
             </div>
           </FadeIn>
-          {userState && (
-            <FadeIn delay={0.05}>
-              <div style={{
-                display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr",
-                gap: 24, marginTop: 24,
-              }}>
-                <LocalInsights stateCode={userState} conflict={CONFLICTS[CONFLICTS.length - 1]} />
-                <PocketImpact stateCode={userState} conflict={CONFLICTS[CONFLICTS.length - 1]} />
+          {!userState && (
+            <div style={{
+              textAlign: "center", padding: "40px 24px",
+              border: `1px dashed ${BORDER}`,
+              borderRadius: 16, marginTop: 24,
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }} aria-hidden="true">📍</div>
+              <div style={{ fontSize: 15, color: TEXT_BRIGHT, fontWeight: 600, marginBottom: 4 }}>
+                See how disruptions hit your state
               </div>
-            </FadeIn>
+              <div style={{ fontSize: 13, color: TEXT_DIM }}>
+                Select your state above to see local tax impact, PADD region vulnerability, and per-gallon cost breakdown.
+              </div>
+            </div>
+          )}
+          {userState && (
+            <>
+              <FadeIn delay={0.05}>
+                <LazyChartShell height={420}>
+                  <div style={{
+                    display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr",
+                    gap: 24, marginTop: 24,
+                  }}>
+                    <LocalInsights stateCode={userState} conflict={CONFLICTS[CONFLICTS.length - 1]} />
+                    <PocketImpact stateCode={userState} conflict={CONFLICTS[CONFLICTS.length - 1]} />
+                  </div>
+                </LazyChartShell>
+              </FadeIn>
+              <FadeIn delay={0.1}>
+                {(() => {
+                  const st = STATE_DATA[userState];
+                  const taxCents = Math.round(st.tax * 100);
+                  const taxRank = STATE_TAX_RANK[userState];
+                  const paddRegion = PADD_NAMES[st.padd].split(" (")[0];
+                  const absOff = Math.abs(st.offset).toFixed(2);
+                  const moreLess = st.offset >= 0 ? "more" : "less";
+                  return (
+                    <InsightCallout>
+                      In {st.name}, your effective gas tax of {taxCents} cents/gallon ranks #{taxRank} nationally. Combined with {paddRegion} infrastructure costs, you pay approximately ${absOff} {moreLess} per gallon than the national average before any disruption pricing.
+                    </InsightCallout>
+                  );
+                })()}
+              </FadeIn>
+            </>
           )}
         </section>
 
@@ -3304,8 +4152,8 @@ export default function App() {
         >
           <FadeIn>
             <div style={{ textAlign: "center", marginBottom: 28 }}>
-              <div style={{ fontSize: 11, color: ACCENT, letterSpacing: 3, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>
-                Chapter 05
+              <div style={{ marginBottom: 8 }}>
+                <ChapterCountUp num={5} />
               </div>
               <h2 style={{
                 fontFamily: DISPLAY_FONT, fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 700, color: TEXT_BRIGHT,
@@ -3316,8 +4164,39 @@ export default function App() {
             </div>
           </FadeIn>
           <FadeIn delay={0.08}>
-            <ScenarioInput onSubmit={handleForecastSubmit} mobile={mobile} />
+            <ScenarioInput onSubmit={handleForecastSubmit} mobile={mobile} loading={forecastLoading} />
           </FadeIn>
+          {forecastLoading && (
+            <div style={{ maxWidth: 800, margin: "24px auto 0" }}>
+              <ChartSkeleton h={280} />
+              <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, color: TEXT_DIM }}>
+                Analyzing historical patterns...
+              </div>
+            </div>
+          )}
+          {!forecastLoading && !forecastResult && !forecastError && (
+            <div style={{ position: "relative", marginTop: 24, maxWidth: 800, marginLeft: "auto", marginRight: "auto" }}>
+              <div style={{ filter: "blur(4px)", opacity: 0.3, pointerEvents: "none" }}>
+                <ForecastChartPreview />
+              </div>
+              <div style={{
+                position: "absolute", inset: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <div style={{
+                  background: BG_CARD, border: `1px solid ${BORDER}`,
+                  borderRadius: 12, padding: "20px 32px", textAlign: "center",
+                }}>
+                  <div style={{ fontSize: 15, color: TEXT_BRIGHT, fontWeight: 600, marginBottom: 4 }}>
+                    Try a scenario above
+                  </div>
+                  <div style={{ fontSize: 13, color: TEXT_DIM }}>
+                    Click a preset or type your own event to see the projected impact.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {forecastError === "noMatch" && (
             <FadeIn delay={0.05}>
               <div style={{
@@ -3377,7 +4256,9 @@ export default function App() {
               The interactive dashboard puts 35 years of data at your fingertips.
             </p>
             <button
-              onClick={() => { setMode("explore"); window.scrollTo(0, 0); }}
+              type="button"
+              aria-label="Switch to explorer dashboard"
+              onClick={() => switchMode("explore")}
               style={{
                 padding: "16px 48px", fontSize: 16, fontWeight: 700, fontFamily: FONT,
                 background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_WARM})`,
@@ -3495,8 +4376,28 @@ export default function App() {
               <br />
               Conflict timelines: <a href="https://www.congress.gov/crs-product/RS21405" target="_blank" rel="noopener" style={{color:TEXT_DIM,textDecoration:"underline"}}>Congressional Research Service, RS21405</a>
             </div>
-            <div style={{ fontSize: 11, color: TEXT_DIM, marginTop: 16, paddingTop: 16, borderTop: `1px solid ${BORDER}` }}>
-              Built with React, D3.js, and Chart.js · Mukund Ummadisetti · 2026
+            <div style={{
+              marginTop: 24, paddingTop: 24, borderTop: `1px solid ${BORDER}`,
+              textAlign: "center",
+            }}>
+              <div style={{ fontSize: 13, color: TEXT_DIM, lineHeight: 1.8 }}>
+                <div style={{ fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 4 }}>
+                  Mukund Ummadisetti
+                </div>
+                <div>
+                  Built with React, D3.js, and Chart.js · Data from EIA, BLS, and Tax Foundation
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+                  <a href="https://github.com/mukund-setti" target="_blank" rel="noopener noreferrer"
+                    style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
+                    GitHub
+                  </a>
+                  <a href="https://linkedin.com/in/mukundsetti" target="_blank" rel="noopener noreferrer"
+                    style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
+                    LinkedIn
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </footer>
@@ -3506,22 +4407,19 @@ export default function App() {
 
   // ── EXPLORER MODE ──
   // Dashboard layout: persistent controls at top, everything visible at once
-  const cfl = activeConflict || CONFLICTS[CONFLICTS.length - 1];
-  const stData = userState ? STATE_DATA[userState] : null;
-
-  // Quick stats for the selected conflict
-  const exDuring = NATIONAL_MONTHLY.filter(d => d.date >= cfl.start && d.date <= cfl.end).map(d => d.price);
-  const exPreDate = parseDate(cfl.start); exPreDate.setMonth(exPreDate.getMonth() - 6);
-  const exPreStr = `${exPreDate.getFullYear()}-${String(exPreDate.getMonth()+1).padStart(2,"0")}`;
-  const exPre = NATIONAL_MONTHLY.filter(d => d.date >= exPreStr && d.date < cfl.start).map(d => d.price);
-  const exPreAvg = exPre.length ? _.mean(exPre) : 2.5;
-  const exPeakNat = exDuring.length ? _.max(exDuring) : 3.5;
-  const exPctChange = exPreAvg > 0 ? ((exPeakNat - exPreAvg) / exPreAvg * 100) : 0;
-  const exStatePeak = stData ? exPeakNat + stData.offset : null;
-  const exStateExtra = stData ? (exPeakNat + stData.offset - (exPreAvg + stData.offset)) * 1200 : null;
+  const { cfl, stData } = explorerStats;
+  const chartShowAllConflicts = !compareMode;
+  const chartHighlightConflicts = compareMode ? (secondConflict ? [activeConflict, secondConflict] : [activeConflict]) : null;
+  const chartHighlightSingle = compareMode ? null : cfl;
+  const metricConflicts = compareMode && secondConflict ? [activeConflict, secondConflict] : [cfl];
 
   return (
-    <div style={{ background: BG, color: TEXT, fontFamily: FONT, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{
+      opacity: transitioning ? 0 : 1,
+      transform: transitioning ? "scale(0.98)" : "scale(1)",
+      transition: reducedMotion ? "none" : "opacity 0.3s ease, transform 0.3s ease",
+      background: BG, color: TEXT, fontFamily: FONT, minHeight: "100vh", display: "flex", flexDirection: "column",
+    }}>
       {/* ── Sticky control bar ── */}
       <header style={{
         position: "sticky", top: 0, zIndex: 100,
@@ -3544,7 +4442,9 @@ export default function App() {
             </span>
           </div>
           <button
-            onClick={() => { setMode("story"); window.scrollTo(0, 0); }}
+            type="button"
+            aria-label="Switch to story mode"
+            onClick={() => switchMode("story")}
             style={{
               padding: "6px 14px", fontSize: 11, fontWeight: 600, fontFamily: FONT,
               background: "transparent", color: TEXT_DIM, border: `1px solid ${BORDER}`,
@@ -3558,39 +4458,105 @@ export default function App() {
         </div>
 
         {/* Control row: conflict pills + state selector */}
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1, alignItems: "center" }}>
-            {CONFLICTS.map(c => (
-              <button
-                key={c.id}
-                onClick={() => handleConflictChange(c)}
-                style={{
-                  padding: "5px 12px", borderRadius: 6, border: `1px solid ${cfl.id === c.id ? c.color : BORDER}`,
-                  background: cfl.id === c.id ? `${c.color}18` : "transparent",
-                  color: cfl.id === c.id ? c.color : TEXT_DIM, fontSize: 11, fontWeight: 600,
-                  cursor: "pointer", fontFamily: FONT, transition: "all 0.15s",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {c.name}
-              </button>
-            ))}
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", flexDirection: mobile ? "column" : "row" }}>
+          <div style={{
+            display: "flex", gap: 6, flexWrap: mobile ? "nowrap" : "wrap", flex: 1, alignItems: "center",
+            overflowX: mobile ? "auto" : "visible", WebkitOverflowScrolling: "touch",
+            scrollSnapType: mobile ? "x mandatory" : "none", paddingBottom: mobile ? 4 : 0, maxWidth: "100%",
+          }}>
             <button
               type="button"
+              aria-label={compareMode ? "Exit compare mode" : "Compare two conflict periods side by side"}
+              aria-pressed={compareMode}
+              onClick={toggleCompareMode}
+              style={{
+                padding: "5px 12px", borderRadius: 6, border: `1px solid ${compareMode ? ACCENT : BORDER}`,
+                background: compareMode ? `${ACCENT}18` : "transparent",
+                color: compareMode ? ACCENT : TEXT_DIM, fontSize: 11, fontWeight: 600,
+                cursor: "pointer", fontFamily: FONT, transition: "all 0.15s",
+                whiteSpace: "nowrap", flexShrink: 0, scrollSnapAlign: "start",
+              }}
+            >
+              Compare
+            </button>
+            <div
+              role="tablist"
+              aria-label="Select a conflict period"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (compareMode) return;
+                const pills = CONFLICTS;
+                const currentIndex = pills.findIndex((x) => x.id === activeConflict.id);
+                if (e.key === "ArrowRight" && currentIndex < pills.length - 1) {
+                  e.preventDefault();
+                  onExplorerConflictClick(pills[currentIndex + 1]);
+                } else if (e.key === "ArrowLeft" && currentIndex > 0) {
+                  e.preventDefault();
+                  onExplorerConflictClick(pills[currentIndex - 1]);
+                }
+              }}
+              style={{
+                display: "flex", gap: 6, flexWrap: mobile ? "nowrap" : "wrap", alignItems: "center",
+                outline: "none",
+              }}
+            >
+            {CONFLICTS.map(c => {
+              const onPrimary = c.id === activeConflict.id;
+              const onSecond = secondConflict?.id === c.id;
+              const hot = !compareMode ? cfl.id === c.id : (onPrimary || onSecond);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={!compareMode ? onPrimary : hot}
+                  aria-label={`Select ${c.name} conflict`}
+                  onClick={() => onExplorerConflictClick(c)}
+                  style={{
+                    padding: "5px 12px", borderRadius: 6,
+                    border: `1px solid ${hot ? c.color : BORDER}`,
+                    borderStyle: onSecond && compareMode ? "dashed" : "solid",
+                    background: onPrimary ? `${c.color}22` : onSecond ? `${c.color}12` : "transparent",
+                    color: hot ? c.color : TEXT_DIM, fontSize: 11, fontWeight: 600,
+                    cursor: "pointer", fontFamily: FONT, transition: "all 0.15s",
+                    whiteSpace: "nowrap", flexShrink: 0, scrollSnapAlign: "start",
+                  }}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
+            </div>
+            <button
+              type="button"
+              aria-label={forecastPanelOpen ? "Close forecast simulator panel" : "Open forecast simulator panel"}
+              aria-expanded={forecastPanelOpen}
               onClick={() => setForecastPanelOpen((o) => !o)}
               style={{
                 padding: "5px 14px", borderRadius: 6, border: `1px solid ${forecastPanelOpen ? ACCENT : BORDER}`,
                 background: forecastPanelOpen ? `${ACCENT}18` : "transparent",
                 color: forecastPanelOpen ? ACCENT : TEXT_DIM, fontSize: 11, fontWeight: 600,
                 cursor: "pointer", fontFamily: FONT, transition: "all 0.15s",
-                whiteSpace: "nowrap",
+                whiteSpace: "nowrap", flexShrink: 0, scrollSnapAlign: "start",
               }}
             >
               Forecast
             </button>
           </div>
-          <div style={{ width: mobile ? "100%" : 220, flexShrink: 0 }}>
-            <StateSelector value={userState} onChange={setUserState} />
+          <div style={{ width: mobile ? "100%" : 240, flexShrink: 0 }}>
+            <input
+              type="search"
+              placeholder="Filter states..."
+              value={explorerStateFilter}
+              onChange={(e) => setExplorerStateFilter(e.target.value)}
+              aria-label="Filter states"
+              style={{
+                width: "100%", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
+                background: BG, border: `1px solid ${BORDER}`, color: TEXT_BRIGHT,
+                fontSize: 12, fontFamily: FONT, outline: "none", boxSizing: "border-box",
+              }}
+            />
+            <StateSelector value={userState} onChange={setUserState} extraFilter={explorerStateFilter} bottomSheet={mobile} />
           </div>
         </div>
       </header>
@@ -3600,42 +4566,65 @@ export default function App() {
 
         {/* Row 1: Conflict context + key stats */}
         <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 320px", gap: 16, marginBottom: 16 }}>
-          {/* Conflict detail */}
           <div style={{
-            background: `${cfl.color}06`, border: `1px solid ${cfl.color}25`,
-            borderRadius: 14, padding: "16px 20px",
-            display: "flex", flexDirection: "column", justifyContent: "center",
+            display: "grid",
+            gridTemplateColumns: compareMode && secondConflict && !mobile ? "1fr 1fr" : "1fr",
+            gap: 12,
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: cfl.color }} />
-              <span style={{ fontSize: 16, fontWeight: 700, color: TEXT_BRIGHT, fontFamily: DISPLAY_FONT }}>
-                {cfl.name}
-              </span>
-              <span style={{ fontSize: 11, color: TEXT_DIM }}>
-                {cfl.region} · {fmtDate(cfl.start)} to {fmtDate(cfl.end)}
-              </span>
-            </div>
-            <p style={{ fontSize: 12, color: TEXT_DIM, lineHeight: 1.55, margin: 0 }}>
-              {cfl.detail}
-            </p>
-          </div>
-
-          {/* Key metrics */}
-          <div style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1,
-            background: BORDER, borderRadius: 14, overflow: "hidden",
-          }}>
-            {[
-              { label: "Pre-conflict avg", value: fmtPrice(exPreAvg), color: TEXT_BRIGHT },
-              { label: "Peak during", value: fmtPrice(exPeakNat), color: ACCENT },
-              { label: "Price change", value: `+${exPctChange.toFixed(1)}%`, color: ACCENT_WARM },
-              { label: stData ? `${stData.name} peak` : "Select a state", value: exStatePeak ? fmtPrice(exStatePeak) : "--", color: stData ? cfl.color : TEXT_DIM },
-            ].map((s, i) => (
-              <div key={i} style={{ background: BG_CARD, padding: "14px 16px" }}>
-                <div style={{ fontSize: 9, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, fontFamily: DISPLAY_FONT, color: s.color }}>{s.value}</div>
+            {metricConflicts.map((mc) => (
+              <div
+                key={mc.id}
+                style={{
+                  background: `${mc.color}06`, border: `1px solid ${mc.color}25`,
+                  borderRadius: 14, padding: "16px 20px",
+                  display: "flex", flexDirection: "column", justifyContent: "center",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: mc.color }} />
+                  <span style={{ fontSize: 16, fontWeight: 700, color: TEXT_BRIGHT, fontFamily: DISPLAY_FONT }}>
+                    {mc.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: TEXT_DIM }}>
+                    {mc.region} · {fmtDate(mc.start)} to {fmtDate(mc.end)}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12, color: TEXT_DIM, lineHeight: 1.55, margin: 0 }}>
+                  {mc.detail}
+                </p>
               </div>
             ))}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {metricConflicts.map((mc) => {
+              const { exPreAvg, exPeakNat, exPctChange, exStatePeak } = getExplorerConflictStats(mc, stData);
+              return (
+                <div key={`m-${mc.id}`}>
+                  {metricConflicts.length > 1 && (
+                    <div style={{ fontSize: 10, fontWeight: 700, color: mc.color, marginBottom: 6, letterSpacing: 0.5 }}>
+                      {mc.name}
+                    </div>
+                  )}
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1,
+                    background: BORDER, borderRadius: 14, overflow: "hidden",
+                  }}>
+                    {[
+                      { label: "Pre-conflict avg", value: fmtPrice(exPreAvg), color: TEXT_BRIGHT },
+                      { label: "Peak during", value: fmtPrice(exPeakNat), color: ACCENT },
+                      { label: "Price change", value: `+${exPctChange.toFixed(1)}%`, color: ACCENT_WARM },
+                      { label: stData ? `${stData.name} peak` : "Select a state", value: exStatePeak ? fmtPrice(exStatePeak) : "--", color: stData ? mc.color : TEXT_DIM },
+                    ].map((s, i) => (
+                      <div key={i} style={{ background: BG_CARD, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 9, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{s.label}</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: DISPLAY_FONT, color: s.color }}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -3650,7 +4639,11 @@ export default function App() {
               <span style={{ fontSize: 11, color: TEXT_DIM, marginLeft: 8 }}>Regular grade, $/gal · EIA</span>
             </div>
           </div>
-          <PriceChart highlightConflict={cfl} showAllConflicts={true} />
+          <PriceChart
+            highlightConflict={chartHighlightSingle}
+            highlightConflicts={chartHighlightConflicts}
+            showAllConflicts={chartShowAllConflicts}
+          />
         </div>
 
         {/* Row 3: Three-panel grid */}
@@ -3666,7 +4659,9 @@ export default function App() {
           }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 2 }}>Regional Prices</div>
             <div style={{ fontSize: 10, color: TEXT_DIM, marginBottom: 12 }}>PADD districts during conflict</div>
-            <RegionChart conflictId={cfl.id} />
+            <LazyChartShell height={340}>
+              <RegionChart conflictId={cfl.id} />
+            </LazyChartShell>
           </div>
 
           {/* Panel B: Import sources */}
@@ -3683,6 +4678,9 @@ export default function App() {
                 {Object.keys(IMPORT_SOURCES_TIMELINE).map(yr => (
                   <button
                     key={yr}
+                    type="button"
+                    aria-label={`Select import data year ${yr}`}
+                    aria-pressed={importYear === yr}
                     onClick={() => setImportYear(yr)}
                     style={{
                       padding: "3px 8px", borderRadius: 4, border: "none",
@@ -3696,7 +4694,9 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <ImportDonut year={importYear} />
+            <LazyChartShell height={300}>
+              <ImportDonut year={importYear} />
+            </LazyChartShell>
           </div>
 
           {/* Panel C: Price impact bars */}
@@ -3705,21 +4705,38 @@ export default function App() {
             border: `1px solid ${BORDER}`,
           }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 2 }}>Price Impact</div>
-            <div style={{ fontSize: 10, color: TEXT_DIM, marginBottom: 12 }}>Change by region during {cfl.name}</div>
-            <VolatilityBars conflictId={cfl.id} />
+            <div style={{ fontSize: 10, color: TEXT_DIM, marginBottom: 12 }}>
+              {compareMode && secondConflict ? "Change by region (compare)" : `Change by region during ${cfl.name}`}
+            </div>
+            {compareMode && secondConflict ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: activeConflict.color, marginBottom: 6 }}>{activeConflict.name}</div>
+                  <VolatilityBars conflictId={activeConflict.id} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: secondConflict.color, marginBottom: 6 }}>{secondConflict.name}</div>
+                  <VolatilityBars conflictId={secondConflict.id} />
+                </div>
+              </div>
+            ) : (
+              <VolatilityBars conflictId={cfl.id} />
+            )}
           </div>
         </div>
 
         {/* Row 4: State detail (only if state selected) */}
         {userState && stData && (
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: mobile ? "1fr" : "1fr 1fr",
-            gap: 16, marginBottom: 16,
-          }}>
-            <LocalInsights stateCode={userState} conflict={cfl} />
-            <PocketImpact stateCode={userState} conflict={cfl} />
-          </div>
+          <LazyChartShell height={400}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: mobile ? "1fr" : "1fr 1fr",
+              gap: 16, marginBottom: 16,
+            }}>
+              <LocalInsights stateCode={userState} conflict={activeConflict} />
+              <PocketImpact stateCode={userState} conflict={activeConflict} />
+            </div>
+          </LazyChartShell>
         )}
 
         {/* Scenario forecast panel (collapsible) */}
@@ -3740,7 +4757,38 @@ export default function App() {
             <div style={{ fontSize: 11, color: TEXT_DIM, marginBottom: 16 }}>
               Uses the same engine as Story mode. State selection above applies to regional adjustments.
             </div>
-            <ScenarioInput onSubmit={handleForecastSubmit} mobile={mobile} />
+            <ScenarioInput onSubmit={handleForecastSubmit} mobile={mobile} loading={forecastLoading} />
+            {forecastLoading && (
+              <div style={{ marginTop: 20 }}>
+                <ChartSkeleton h={260} />
+                <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: TEXT_DIM }}>
+                  Analyzing historical patterns...
+                </div>
+              </div>
+            )}
+            {!forecastLoading && !forecastResult && !forecastError && forecastPanelOpen && (
+              <div style={{ position: "relative", marginTop: 20 }}>
+                <div style={{ filter: "blur(4px)", opacity: 0.3, pointerEvents: "none" }}>
+                  <ForecastChartPreview />
+                </div>
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <div style={{
+                    background: BG_CARD, border: `1px solid ${BORDER}`,
+                    borderRadius: 12, padding: "16px 24px", textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: 14, color: TEXT_BRIGHT, fontWeight: 600, marginBottom: 4 }}>
+                      Try a scenario above
+                    </div>
+                    <div style={{ fontSize: 12, color: TEXT_DIM }}>
+                      Click a preset or type your own event to see the projected impact.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {forecastError === "noMatch" && (
               <div style={{
                 marginTop: 16, padding: 14, borderRadius: 12, background: BG,
@@ -3775,11 +4823,85 @@ export default function App() {
         </div>
 
         {/* Minimal footer */}
-        <div style={{ padding: "16px 0", borderTop: `1px solid ${BORDER}`, fontSize: 10, color: TEXT_DIM }}>
-          Sources: EIA · Tax Foundation · NBER · IEA · CRS · Dallas Fed ·
-          Built with React, D3.js, Chart.js · Mukund Ummadisetti · 2026
-        </div>
+        <footer style={{
+          padding: "40px 0 24px", borderTop: `1px solid ${BORDER}`, marginTop: 40,
+          textAlign: "center",
+        }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+            <button
+              type="button"
+              aria-label="Export national gas price data as CSV"
+              onClick={() => exportPriceCSV()}
+              style={{
+                padding: "8px 14px", fontSize: 11, fontWeight: 600, fontFamily: FONT,
+                background: BG_CARD, color: TEXT_BRIGHT, border: `1px solid ${BORDER}`,
+                borderRadius: 8, cursor: "pointer",
+              }}
+            >
+              Export Data (CSV)
+            </button>
+          </div>
+          <div style={{ fontSize: 13, color: TEXT_DIM, lineHeight: 1.8 }}>
+            <div style={{ fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 4 }}>
+              Mukund Ummadisetti
+            </div>
+            <div>
+              Built with React, D3.js, and Chart.js · Data from EIA, BLS, and Tax Foundation
+            </div>
+            <div style={{ fontSize: 11, color: TEXT_DIM, marginTop: 6 }}>
+              Sources: EIA · Tax Foundation · NBER · IEA · CRS · Dallas Fed
+            </div>
+            <div style={{ marginTop: 8, display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+              <a href="https://github.com/mukund-setti" target="_blank" rel="noopener noreferrer"
+                style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
+                GitHub
+              </a>
+              <a href="https://linkedin.com/in/mukundsetti" target="_blank" rel="noopener noreferrer"
+                style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
+                LinkedIn
+              </a>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
+  );
+}
+
+function App() {
+  const reducedMotion = usePrefersReducedMotion();
+  return (
+    <ReducedMotionContext.Provider value={reducedMotion}>
+      <div style={{ position: "relative", minHeight: "100vh" }}>
+        <a
+          href="#main-content"
+          style={{
+            position: "absolute",
+            left: "-9999px",
+            top: 0,
+            padding: "8px 16px",
+            background: ACCENT,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 600,
+            borderRadius: "0 0 8px 0",
+            zIndex: 9999,
+          }}
+          onFocus={(e) => { e.target.style.left = "0"; }}
+          onBlur={(e) => { e.target.style.left = "-9999px"; }}
+        >
+          Skip to content
+        </a>
+        <AppMain />
+      </div>
+    </ReducedMotionContext.Provider>
+  );
+}
+
+export default function Page() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }

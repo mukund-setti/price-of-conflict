@@ -1,2 +1,17 @@
 * { box-sizing: border-box; }
 body { background: #0a0a0a; color: #e8e6e3; margin: 0; padding: 0; }
+
+[id^="story-"] {
+  scroll-margin-top: 72px;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  canvas, svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+}
