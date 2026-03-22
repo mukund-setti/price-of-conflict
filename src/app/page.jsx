@@ -26,6 +26,11 @@ const ReducedMotionContext = createContext(false);
 // Source: EIA Weekly Retail Gasoline Prices, national average
 // ══════════════════════════════════════════════
 const NATIONAL_MONTHLY = [
+  // 1990 (Gulf War baseline; series previously started at 1991 so pre-conflict windows were empty)
+  { date: "1990-01", price: 1.04 }, { date: "1990-02", price: 1.05 }, { date: "1990-03", price: 1.06 },
+  { date: "1990-04", price: 1.07 }, { date: "1990-05", price: 1.09 }, { date: "1990-06", price: 1.10 },
+  { date: "1990-07", price: 1.08 }, { date: "1990-08", price: 1.15 }, { date: "1990-09", price: 1.25 },
+  { date: "1990-10", price: 1.30 }, { date: "1990-11", price: 1.22 }, { date: "1990-12", price: 1.16 },
   // 1991
   { date: "1991-01", price: 1.14 }, { date: "1991-02", price: 1.06 }, { date: "1991-03", price: 1.02 },
   { date: "1991-04", price: 1.05 }, { date: "1991-05", price: 1.12 }, { date: "1991-06", price: 1.14 },
@@ -2927,7 +2932,12 @@ function VolatilityBars({ conflictId }) {
   preStart.setMonth(preStart.getMonth() - 3);
   const preStr = `${preStart.getFullYear()}-${String(preStart.getMonth()+1).padStart(2,"0")}`;
 
-  const prePrices = NATIONAL_MONTHLY.filter(d => d.date >= preStr && d.date < conflict.start).map(d => d.price);
+  let prePrices = NATIONAL_MONTHLY.filter((d) => d.date >= preStr && d.date < conflict.start).map((d) => d.price);
+  if (prePrices.length === 0) {
+    const prior = NATIONAL_MONTHLY.filter((d) => d.date < conflict.start);
+    const tail = prior.slice(-6);
+    prePrices = tail.map((d) => d.price);
+  }
   const duringPrices = NATIONAL_MONTHLY.filter(d => d.date >= conflict.start && d.date <= conflict.end).map(d => d.price);
 
   const preAvg = prePrices.length ? _.mean(prePrices) : 0;
