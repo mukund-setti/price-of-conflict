@@ -1,6 +1,21 @@
 * { box-sizing: border-box; }
 body { background: #0a0a0a; color: #e8e6e3; margin: 0; padding: 0; }
 
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(230, 57, 70, 0); }
+}
+
+.story-explore-cta-pulse {
+  animation: pulse-glow 1.5s ease 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-explore-cta-pulse {
+    animation: none;
+  }
+}
+
 [id^="story-"] {
   scroll-margin-top: 72px;
 }

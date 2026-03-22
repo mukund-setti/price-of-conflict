@@ -441,7 +441,10 @@ const DISRUPTION_PROFILES = [
     id: "world-war",
     category: "Multi-Theater Global Conflict",
     description: "Large-scale conflict involving multiple major powers and oil regions",
-    keywords: ["world war", "ww3", "wwiii", "global war", "nuclear", "nato war", "great power war", "multi-front", "world war 3"],
+    keywords: [
+      "world war", "ww3", "wwiii", "global war", "nuclear", "nato war", "great power war",
+      "multi-front", "multi-theater", "between major powers", "major powers", "world war 3",
+    ],
     historicalExamples: [
       { name: "No modern precedent. Estimated from compounding worst-case scenarios.", peakIncrease: null, monthsToPeak: null, recovery: null },
     ],
@@ -894,6 +897,8 @@ const STATE_TAX_RANK = Object.fromEntries(
     .sort((a, b) => b[1].tax - a[1].tax)
     .map(([code], i) => [code, i + 1])
 );
+
+const STORY_PREVIEW_STATES = ["CA", "TX", "NY", "FL", "IL", "OH"];
 
 const GUIDED_ANNOTATIONS = [
   { date: "1990-10", label: "Gulf War", insight: "Iraq invades Kuwait. Prices jump 47% in 3 months.", price: 1.59 },
@@ -1728,7 +1733,7 @@ function ScenarioInput({ onSubmit, mobile, loading = false }) {
     { label: "OPEC production cut", text: "OPEC announces 3 million barrel per day production cut in mid 2027" },
     { label: "Global recession", text: "Global recession and demand collapse starting Q1 2028" },
     { label: "Severe hurricane season", text: "Category 5 hurricane destroys Gulf Coast refineries in August 2027" },
-    { label: "World war", text: "Large-scale multi-theater conflict between major powers starting 2027" },
+    { label: "World war", text: "World war: large-scale multi-theater conflict between major powers starting 2027" },
   ];
   const runPreset = (text) => {
     setInputText(text);
@@ -3394,6 +3399,9 @@ function AppMain() {
   const [compareMode, setCompareMode] = useState(false);
   const [secondConflict, setSecondConflict] = useState(null);
   const [explorerStateFilter, setExplorerStateFilter] = useState("");
+  const [storyPreviewState, setStoryPreviewState] = useState(null);
+  const [stickyExplorePulse, setStickyExplorePulse] = useState(false);
+  const stickyExplorePulseDone = useRef(false);
   const mobile = useIsMobile();
 
   const switchMode = useCallback((newMode) => {
@@ -3504,6 +3512,15 @@ function AppMain() {
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  const stickyStoryBarVisible = mode === "story" && scrollY > heroHeight * 0.8;
+  useEffect(() => {
+    if (reducedMotion || stickyExplorePulseDone.current || !stickyStoryBarVisible) return;
+    stickyExplorePulseDone.current = true;
+    setStickyExplorePulse(true);
+    const t = window.setTimeout(() => setStickyExplorePulse(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [stickyStoryBarVisible, reducedMotion]);
 
   useEffect(() => {
     const syncHeroHeight = () => setHeroHeight(window.innerHeight);
@@ -3650,6 +3667,7 @@ function AppMain() {
           </span>
           <button
             type="button"
+            className={stickyExplorePulse ? "story-explore-cta-pulse" : undefined}
             aria-label="Switch to explorer dashboard"
             onClick={() => switchMode("explore")}
             style={{
@@ -3662,7 +3680,7 @@ function AppMain() {
             onMouseEnter={e => e.target.style.transform = "scale(1.04)"}
             onMouseLeave={e => e.target.style.transform = "scale(1)"}
           >
-            Open Dashboard →
+            Explore Data →
           </button>
         </div>
         {/* Hero */}
@@ -3705,15 +3723,56 @@ function AppMain() {
             <div style={{ marginTop: 36, marginBottom: 28 }}>
               <GasPumpSign price={4.18} />
             </div>
-            <div style={{ marginTop: 48, animation: reducedMotion ? "none" : "bounce 2s ease infinite" }}>
-              <div style={{ fontSize: 11, color: TEXT_DIM, letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 }}>
-                Scroll to explore
-              </div>
-              <div style={{ fontSize: 24, color: TEXT_DIM }}>↓</div>
+            <div style={{
+              display: "flex", gap: 12, marginTop: 32, justifyContent: "center",
+              flexWrap: "wrap",
+            }}>
+              <button
+                type="button"
+                onClick={() => scrollToStoryChapter("main-content")}
+                style={{
+                  padding: "12px 28px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  background: "transparent", border: `1px solid ${BORDER}`,
+                  color: TEXT_BRIGHT, cursor: "pointer", fontFamily: FONT,
+                }}
+              >
+                Read the Story ↓
+              </button>
+              <button
+                type="button"
+                aria-label="Open interactive data dashboard"
+                onClick={() => switchMode("explore")}
+                style={{
+                  padding: "12px 28px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                  background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT_WARM})`,
+                  border: "none", color: "#fff", cursor: "pointer", fontFamily: FONT,
+                }}
+              >
+                Explore the Data →
+              </button>
             </div>
           </div>
-          <style>{`@keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(8px); } }`}</style>
         </section>
+
+        <div
+          style={{
+            display: "flex", gap: mobile ? 12 : 24, justifyContent: "center",
+            flexWrap: "wrap", padding: "0 24px 24px",
+          }}
+          aria-label="Interactive features in this experience"
+        >
+          {[
+            "📊 7 chart types",
+            "🔍 State-level data",
+            "⚖️ Conflict comparison",
+            "🔮 Scenario simulator",
+            "📥 Data export",
+          ].map((feature) => (
+            <span key={feature} style={{ fontSize: 11, color: TEXT_DIM, opacity: 0.65 }}>
+              {feature}
+            </span>
+          ))}
+        </div>
 
         {/* Hero stat strip */}
         <section
@@ -3787,6 +3846,85 @@ function AppMain() {
                 </div>
                 <PriceBreakdownBar stateCode={userState} />
               </div>
+            </div>
+          </FadeIn>
+        </section>
+
+        <section style={{ maxWidth: 800, margin: "0 auto", padding: "0 24px 60px" }}>
+          <FadeIn>
+            <div style={{
+              background: BG_CARD, border: `1px solid ${BORDER}`, borderRadius: 16,
+              padding: mobile ? "20px 16px" : "24px 28px", textAlign: "center",
+            }}>
+              <div style={{
+                fontSize: 15, fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 12,
+              }}>
+                What does your state pay?
+              </div>
+              <div
+                role="group"
+                aria-label="Choose a state for a quick price snapshot"
+                style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}
+              >
+                {STORY_PREVIEW_STATES.map((code) => {
+                  const st = STATE_DATA[code];
+                  const selected = storyPreviewState === code;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setStoryPreviewState(selected ? null : code)}
+                      style={{
+                        padding: "6px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        border: `1px solid ${selected ? ACCENT : BORDER}`,
+                        background: selected ? `${ACCENT}15` : "transparent",
+                        color: selected ? ACCENT : TEXT_DIM,
+                        cursor: "pointer", fontFamily: FONT, transition: "all 0.2s",
+                      }}
+                    >
+                      {code}
+                    </button>
+                  );
+                })}
+              </div>
+              {storyPreviewState && (() => {
+                const st = STATE_DATA[storyPreviewState];
+                const natAvgRetail = NATIONAL_MONTHLY[NATIONAL_MONTHLY.length - 1]?.price ?? 4.18;
+                const estPrice = natAvgRetail + st.offset;
+                const delta = st.offset;
+                const deltaAbs = Math.abs(delta).toFixed(2);
+                const moreLess = delta >= 0 ? "more" : "less";
+                const taxCents = (st.tax * 100).toFixed(1);
+                const rank = STATE_TAX_RANK[storyPreviewState];
+                const totalStates = Object.keys(STATE_DATA).length;
+                const paddShort = PADD_NAMES[st.padd].split(" (")[0];
+                const taxNote = rank === 1
+                  ? `among the highest state gas taxes in the country (${taxCents} cents/gal, #1 of ${totalStates}).`
+                  : `including a state gas tax of ${taxCents} cents/gal (#${rank} of ${totalStates}).`;
+                return (
+                  <div style={{ fontSize: 14, color: TEXT_DIM, lineHeight: 1.65, marginBottom: 14 }}>
+                    In <strong style={{ color: TEXT_BRIGHT }}>{st.name}</strong>, drivers see about{" "}
+                    <strong style={{ color: ACCENT }}>{fmtPrice(estPrice)}</strong>/gal at the pump, roughly{" "}
+                    <strong style={{ color: TEXT_BRIGHT }}>${deltaAbs}</strong> per gallon {moreLess} than the
+                    March 2026 national average, {taxNote} {paddShort} regional infrastructure also shapes
+                    what you pay.
+                  </div>
+                );
+              })()}
+              <button
+                type="button"
+                onClick={() => {
+                  scrollToStoryChapter("story-ch4");
+                  if (storyPreviewState) setUserState(storyPreviewState);
+                }}
+                style={{
+                  fontSize: 12, color: ACCENT, background: "none", border: "none",
+                  cursor: "pointer", fontFamily: FONT, fontWeight: 600, padding: 0,
+                }}
+              >
+                See the full breakdown in Chapter 04 →
+              </button>
             </div>
           </FadeIn>
         </section>
