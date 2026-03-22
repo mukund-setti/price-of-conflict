@@ -2799,9 +2799,14 @@ function ImportDonut({ year }) {
         cutout: "62%",
         plugins: {
           legend: {
-            position: "right",
+            position: "bottom",
+            align: "center",
             labels: {
-              color: TEXT, font: { family: FONT, size: 12 }, padding: 12, boxWidth: 14,
+              color: TEXT,
+              font: { family: FONT, size: mobile ? 10 : 11 },
+              padding: 10,
+              boxWidth: 12,
+              boxHeight: 12,
               generateLabels: (chart) => {
                 const ds = chart.data.datasets[0];
                 return chart.data.labels.map((l, i) => ({
@@ -2811,8 +2816,8 @@ function ImportDonut({ year }) {
                   fontColor: TEXT,
                   index: i,
                 }));
-              }
-            }
+              },
+            },
           },
           tooltip: { enabled: false },
         },
@@ -2829,13 +2834,13 @@ function ImportDonut({ year }) {
     });
 
     return () => { if (chartRef.current) chartRef.current.destroy(); };
-  }, [year]);
+  }, [year, mobile]);
 
   const ctx = hovered ? COUNTRY_CONTEXT[hovered] : null;
   const hoveredPct = hovered ? sources[hovered] : null;
 
   return (
-    <div>
+    <div style={{ minWidth: 0, width: "100%", overflow: "hidden" }}>
       {/* Chart title/context */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: TEXT_DIM, lineHeight: 1.5 }}>
@@ -2844,12 +2849,18 @@ function ImportDonut({ year }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "280px 1fr", gap: 20, alignItems: "start" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: mobile ? "1fr" : "minmax(0, 42%) minmax(0, 58%)",
+        gap: mobile ? 16 : 14,
+        alignItems: "stretch",
+      }}>
         {/* Left: info panel */}
         <div style={{
-          background: `${BG}80`, borderRadius: 14, padding: 20,
+          background: `${BG}80`, borderRadius: 14, padding: mobile ? 16 : 18,
           border: `1px solid ${BORDER}`,
-          minHeight: mobile ? "auto" : 240,
+          minHeight: mobile ? "auto" : 200,
+          minWidth: 0,
           transition: "all 0.3s ease",
         }}>
           {ctx ? (
@@ -2893,8 +2904,12 @@ function ImportDonut({ year }) {
           )}
         </div>
 
-        {/* Right: donut chart */}
-        <div style={{ height: 280, position: "relative" }} role="img" aria-label={`U.S. crude oil import shares by country for ${year}`}>
+        {/* Right: donut chart (legend below slice, fits narrow explorer column) */}
+        <div
+          style={{ height: mobile ? 300 : 320, minWidth: 0, position: "relative" }}
+          role="img"
+          aria-label={`U.S. crude oil import shares by country for ${year}`}
+        >
           <canvas ref={canvasRef} />
         </div>
       </div>
@@ -2930,23 +2945,28 @@ function VolatilityBars({ conflictId }) {
   const maxPct = Math.max(...regions.map(r => Math.abs(r.pct)), Math.abs(pctChange));
 
   return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
-        <div style={{ background: BG_CARD, borderRadius: 12, padding: "16px 20px", border: `1px solid ${BORDER}` }}>
-          <div style={{ fontSize: 11, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 1 }}>Pre-Conflict Avg</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: TEXT_BRIGHT, fontFamily: DISPLAY_FONT }}>
+    <div style={{ minWidth: 0, width: "100%" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: mobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+        gap: 12,
+        marginBottom: 24,
+      }}>
+        <div style={{ background: BG_CARD, borderRadius: 12, padding: "12px 14px", border: `1px solid ${BORDER}`, minWidth: 0 }}>
+          <div style={{ fontSize: 10, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 0.8 }}>Pre-Conflict Avg</div>
+          <div style={{ fontSize: mobile ? 22 : "clamp(18px, 2.5vw, 26px)", fontWeight: 700, color: TEXT_BRIGHT, fontFamily: DISPLAY_FONT, lineHeight: 1.15 }}>
             <AnimatedNumber value={preAvg} prefix="$" />
           </div>
         </div>
-        <div style={{ background: BG_CARD, borderRadius: 12, padding: "16px 20px", border: `1px solid ${BORDER}` }}>
-          <div style={{ fontSize: 11, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 1 }}>During Conflict</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: ACCENT, fontFamily: DISPLAY_FONT }}>
+        <div style={{ background: BG_CARD, borderRadius: 12, padding: "12px 14px", border: `1px solid ${BORDER}`, minWidth: 0 }}>
+          <div style={{ fontSize: 10, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 0.8 }}>During Conflict</div>
+          <div style={{ fontSize: mobile ? 22 : "clamp(18px, 2.5vw, 26px)", fontWeight: 700, color: ACCENT, fontFamily: DISPLAY_FONT, lineHeight: 1.15 }}>
             <AnimatedNumber value={duringAvg} prefix="$" />
           </div>
         </div>
-        <div style={{ background: BG_CARD, borderRadius: 12, padding: "16px 20px", border: `1px solid ${BORDER}` }}>
-          <div style={{ fontSize: 11, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 1 }}>Peak Price</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: ACCENT_WARM, fontFamily: DISPLAY_FONT }}>
+        <div style={{ background: BG_CARD, borderRadius: 12, padding: "12px 14px", border: `1px solid ${BORDER}`, minWidth: 0 }}>
+          <div style={{ fontSize: 10, color: TEXT_DIM, textTransform: "uppercase", letterSpacing: 0.8 }}>Peak Price</div>
+          <div style={{ fontSize: mobile ? 22 : "clamp(18px, 2.5vw, 26px)", fontWeight: 700, color: ACCENT_WARM, fontFamily: DISPLAY_FONT, lineHeight: 1.15 }}>
             <AnimatedNumber value={duringMax} prefix="$" />
           </div>
         </div>
@@ -2956,9 +2976,21 @@ function VolatilityBars({ conflictId }) {
         Price Change by Region
       </div>
       {regions.map((r, i) => (
-        <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-          <div style={{ width: mobile ? 90 : 140, fontSize: mobile ? 10 : 12, color: TEXT_DIM, textAlign: "right", flexShrink: 0 }}>{r.name}</div>
-          <div style={{ flex: 1, height: 20, background: GRID, borderRadius: 4, overflow: "hidden", position: "relative" }}>
+        <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, minWidth: 0 }}>
+          <div style={{
+            width: mobile ? 88 : 108,
+            maxWidth: "38%",
+            fontSize: mobile ? 10 : 11,
+            color: TEXT_DIM,
+            textAlign: "right",
+            flexShrink: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+            title={r.name}
+          >{r.name}</div>
+          <div style={{ flex: 1, minWidth: 0, height: 20, background: GRID, borderRadius: 4, overflow: "hidden", position: "relative" }}>
             <div style={{
               width: `${Math.abs(r.pct) / maxPct * 100}%`,
               height: "100%",
@@ -3402,6 +3434,8 @@ function AppMain() {
   const [storyPreviewState, setStoryPreviewState] = useState(null);
   const [stickyExplorePulse, setStickyExplorePulse] = useState(false);
   const stickyExplorePulseDone = useRef(false);
+  const storyNavScrollLockUntilRef = useRef(0);
+  const storyNavRef = useRef(null);
   const mobile = useIsMobile();
 
   const switchMode = useCallback((newMode) => {
@@ -3510,8 +3544,10 @@ function AppMain() {
   const scrollToStoryChapter = useCallback((chapterId) => {
     const el = document.getElementById(chapterId);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+    setActiveStoryChapter(chapterId);
+    storyNavScrollLockUntilRef.current = Date.now() + (reducedMotion ? 0 : 1200);
+    el.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  }, [reducedMotion]);
 
   const stickyStoryBarVisible = mode === "story" && scrollY > heroHeight * 0.8;
   useEffect(() => {
@@ -3534,8 +3570,9 @@ function AppMain() {
       const y = window.scrollY;
       setScrollY(y);
       if (mode === "story") {
+        if (Date.now() < storyNavScrollLockUntilRef.current) return;
         const topBar = y > heroHeight * 0.8 ? 56 : 0;
-        const readingLine = topBar + 72;
+        const readingLine = topBar + 80;
         let current = STORY_CHAPTERS[0].id;
         for (const ch of STORY_CHAPTERS) {
           const el = document.getElementById(ch.id);
@@ -3550,6 +3587,16 @@ function AppMain() {
     return () => window.removeEventListener("scroll", onScroll);
   }, [mode, heroHeight]);
 
+  useEffect(() => {
+    if (mode !== "story" || mobile) return;
+    const nav = storyNavRef.current;
+    if (!nav) return;
+    const btn = nav.querySelector(`[data-story-ch="${activeStoryChapter}"]`);
+    if (btn && typeof btn.scrollIntoView === "function") {
+      btn.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
+    }
+  }, [activeStoryChapter, mode, mobile, reducedMotion]);
+
   const explorerStats = useMemo(() => {
     const cfl = activeConflict || CONFLICTS[CONFLICTS.length - 1];
     const stData = userState ? STATE_DATA[userState] : null;
@@ -3560,11 +3607,11 @@ function AppMain() {
 
   // ── STORY MODE ──
   if (mode === "story") {
-    const sidebarTop = scrollY > heroHeight * 0.8 ? 56 : 22;
+    const stickyBarLeft = mobile ? 0 : 196;
     return (
       <div style={{
         opacity: transitioning ? 0 : 1,
-        transform: transitioning ? "scale(0.98)" : "scale(1)",
+        ...(transitioning ? { transform: "scale(0.98)" } : {}),
         transition: reducedMotion ? "none" : "opacity 0.3s ease, transform 0.3s ease",
         background: BG, color: TEXT, fontFamily: FONT, minHeight: "100vh",
         paddingLeft: mobile ? 0 : 196,
@@ -3572,18 +3619,20 @@ function AppMain() {
       }}>
         {!mobile && (
           <nav
+            ref={storyNavRef}
             aria-label="Story chapters"
             style={{
               position: "fixed",
               left: 0,
-              top: sidebarTop,
+              top: 0,
               width: 196,
-              maxHeight: `calc(100vh - ${sidebarTop + 20}px)`,
+              height: "100vh",
+              maxHeight: "100vh",
               overflowY: "auto",
               overflowX: "hidden",
-              zIndex: 150,
-              padding: "10px 12px 20px 16px",
-              background: `${BG}e6`,
+              zIndex: 210,
+              padding: "16px 12px 24px 16px",
+              background: `${BG}f0`,
               backdropFilter: "blur(14px)",
               WebkitBackdropFilter: "blur(14px)",
               borderRight: `1px solid ${BORDER}`,
@@ -3608,6 +3657,7 @@ function AppMain() {
                 <button
                   key={ch.id}
                   type="button"
+                  data-story-ch={ch.id}
                   aria-label={`Jump to story section: ${ch.label}`}
                   aria-current={active ? "true" : undefined}
                   onClick={() => scrollToStoryChapter(ch.id)}
@@ -3615,14 +3665,22 @@ function AppMain() {
                     width: "100%",
                     display: "block",
                     textAlign: "left",
-                    background: active ? `${ACCENT}14` : "transparent",
+                    background: active
+                      ? `linear-gradient(90deg, ${ACCENT}24 0%, ${ACCENT}0c 100%)`
+                      : "transparent",
                     border: "none",
-                    borderLeft: `2px solid ${active ? ACCENT : "transparent"}`,
+                    borderLeft: `3px solid ${active ? ACCENT : "transparent"}`,
                     cursor: "pointer",
-                    padding: "7px 8px 7px 10px",
-                    marginBottom: 1,
-                    borderRadius: "0 8px 8px 0",
-                    transition: "background 0.2s ease, border-color 0.2s ease",
+                    padding: "8px 8px 8px 10px",
+                    marginBottom: 2,
+                    borderRadius: "0 10px 10px 0",
+                    boxShadow: active
+                      ? `0 0 0 1px ${ACCENT}28, 0 4px 24px ${ACCENT}18`
+                      : "none",
+                    opacity: active ? 1 : 0.72,
+                    transition: reducedMotion
+                      ? "none"
+                      : "opacity 0.45s ease, background 0.45s ease, border-color 0.45s ease, box-shadow 0.45s ease",
                     fontFamily: FONT,
                   }}
                 >
@@ -3631,9 +3689,11 @@ function AppMain() {
                       fontSize: 9,
                       letterSpacing: 1.5,
                       textTransform: "uppercase",
-                      color: active ? ACCENT : TEXT_DIM,
+                      color: active ? ACCENT_WARM : TEXT_DIM,
                       fontWeight: 600,
                       marginBottom: 3,
+                      opacity: active ? 1 : 0.85,
+                      transition: reducedMotion ? "none" : "opacity 0.45s ease, color 0.45s ease",
                     }}>
                       {ch.sub}
                     </div>
@@ -3643,6 +3703,7 @@ function AppMain() {
                     fontWeight: active ? 600 : 500,
                     color: active ? TEXT_BRIGHT : TEXT_DIM,
                     lineHeight: 1.35,
+                    transition: reducedMotion ? "none" : "color 0.45s ease, font-weight 0.2s ease",
                   }}>
                     {ch.label}
                   </div>
@@ -3651,9 +3712,9 @@ function AppMain() {
             })}
           </nav>
         )}
-        {/* Sticky story nav - appears after scrolling past hero */}
+        {/* Sticky story nav - content column only on desktop so the chapter rail stays visible */}
         <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 200,
+          position: "fixed", top: 0, left: stickyBarLeft, right: 0, zIndex: 200,
           background: `${BG}f0`, backdropFilter: "blur(16px)",
           borderBottom: `1px solid ${BORDER}`,
           padding: "10px 24px",
@@ -4550,20 +4611,26 @@ function AppMain() {
   const chartHighlightConflicts = compareMode ? (secondConflict ? [activeConflict, secondConflict] : [activeConflict]) : null;
   const chartHighlightSingle = compareMode ? null : cfl;
   const metricConflicts = compareMode && secondConflict ? [activeConflict, secondConflict] : [cfl];
+  const explorerMaxW = 1280;
+  const explorerPadX = mobile ? 16 : 24;
 
   return (
     <div style={{
       opacity: transitioning ? 0 : 1,
-      transform: transitioning ? "scale(0.98)" : "scale(1)",
+      ...(transitioning ? { transform: "scale(0.98)" } : {}),
       transition: reducedMotion ? "none" : "opacity 0.3s ease, transform 0.3s ease",
       background: BG, color: TEXT, fontFamily: FONT, minHeight: "100vh", display: "flex", flexDirection: "column",
     }}>
-      {/* ── Sticky control bar ── */}
+      {/* ── Sticky control bar (same content width as dashboard body) ── */}
       <header style={{
         position: "sticky", top: 0, zIndex: 100,
         background: `${BG}f0`, backdropFilter: "blur(16px)",
         borderBottom: `1px solid ${BORDER}`,
-        padding: mobile ? "10px 16px" : "10px 24px",
+        padding: mobile ? "10px 16px" : `10px ${explorerPadX}px`,
+        maxWidth: explorerMaxW,
+        margin: "0 auto",
+        width: "100%",
+        boxSizing: "border-box",
       }}>
         {/* Top row: title + back */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -4652,8 +4719,9 @@ function AppMain() {
                   onClick={() => onExplorerConflictClick(c)}
                   style={{
                     padding: "5px 12px", borderRadius: 6,
-                    border: `1px solid ${hot ? c.color : BORDER}`,
+                    borderWidth: 1,
                     borderStyle: onSecond && compareMode ? "dashed" : "solid",
+                    borderColor: hot ? c.color : BORDER,
                     background: onPrimary ? `${c.color}22` : onSecond ? `${c.color}12` : "transparent",
                     color: hot ? c.color : TEXT_DIM, fontSize: 11, fontWeight: 600,
                     cursor: "pointer", fontFamily: FONT, transition: "all 0.15s",
@@ -4700,7 +4768,14 @@ function AppMain() {
       </header>
 
       {/* ── Dashboard body ── */}
-      <div style={{ flex: 1, padding: mobile ? "16px" : "20px 24px", maxWidth: 1280, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+      <div style={{
+        flex: 1,
+        padding: mobile ? "16px" : `20px ${explorerPadX}px`,
+        maxWidth: explorerMaxW,
+        margin: "0 auto",
+        width: "100%",
+        boxSizing: "border-box",
+      }}>
 
         {/* Row 1: Conflict context + key stats */}
         <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 320px", gap: 16, marginBottom: 16 }}>
@@ -4784,16 +4859,17 @@ function AppMain() {
           />
         </div>
 
-        {/* Row 3: Three-panel grid */}
+        {/* Row 3: Three-panel grid (minmax(0,1fr) keeps Price Impact column from blowing track widths) */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: mobile ? "1fr" : "1fr 1fr 1fr",
+          gridTemplateColumns: mobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
           gap: 16, marginBottom: 16,
         }}>
           {/* Panel A: Regional comparison */}
           <div style={{
             background: BG_CARD, borderRadius: 14, padding: 18,
             border: `1px solid ${BORDER}`,
+            minWidth: 0,
           }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 2 }}>Regional Prices</div>
             <div style={{ fontSize: 10, color: TEXT_DIM, marginBottom: 12 }}>PADD districts during conflict</div>
@@ -4806,6 +4882,7 @@ function AppMain() {
           <div style={{
             background: BG_CARD, borderRadius: 14, padding: 18,
             border: `1px solid ${BORDER}`,
+            minWidth: 0,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div>
@@ -4832,7 +4909,7 @@ function AppMain() {
                 ))}
               </div>
             </div>
-            <LazyChartShell height={300}>
+            <LazyChartShell height={420}>
               <ImportDonut year={importYear} />
             </LazyChartShell>
           </div>
@@ -4841,6 +4918,7 @@ function AppMain() {
           <div style={{
             background: BG_CARD, borderRadius: 14, padding: 18,
             border: `1px solid ${BORDER}`,
+            minWidth: 0,
           }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: TEXT_BRIGHT, marginBottom: 2 }}>Price Impact</div>
             <div style={{ fontSize: 10, color: TEXT_DIM, marginBottom: 12 }}>
