@@ -4601,7 +4601,7 @@ function AppMain() {
                     style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
                     GitHub
                   </a>
-                  <a href="https://linkedin.com/in/mukundsetti" target="_blank" rel="noopener noreferrer"
+                  <a href="https://www.linkedin.com/in/mukundummadisetti/" target="_blank" rel="noopener noreferrer"
                     style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
                     LinkedIn
                   </a>
@@ -5082,7 +5082,7 @@ function AppMain() {
                 style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
                 GitHub
               </a>
-              <a href="https://linkedin.com/in/mukundsetti" target="_blank" rel="noopener noreferrer"
+              <a href="https://www.linkedin.com/in/mukundummadisetti/" target="_blank" rel="noopener noreferrer"
                 style={{ color: TEXT_DIM, textDecoration: "none", fontSize: 12 }}>
                 LinkedIn
               </a>
