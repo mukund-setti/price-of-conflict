@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# The Price of Conflict
 
-## Getting Started
+An interactive visual guide to how U.S. retail gasoline prices move with crude markets, taxes, regions, and major supply disruptions. The experience is built for clarity and exploration: a **Story** mode walks readers through the narrative, and an **Explorer** dashboard lets them compare conflicts, regions, and scenarios on their own.
 
-First, run the development server:
+**Live site:** [price-of-conflict.vercel.app](https://price-of-conflict.vercel.app)
+
+## What you will find
+
+- **Story mode**  
+  Scroll-based chapters from intro through regional differences, import mix, state-level taxes, and a text-based **forecast simulator**. Includes guided highlights on the main national price chart, insight callouts after major visuals, a breakdown of what goes into a gallon of gas, sparkline legends for each conflict period, and a fixed chapter rail (desktop) that tracks your place in the narrative.
+
+- **Explorer mode**  
+  A single-screen dashboard: national price timeline with selectable conflict bands, **compare two conflicts** side by side (timeline, regional charts, volatility bars, key metrics), PADD regional line charts, U.S. crude import donut by year, state filter and mobile-friendly state picker, and **CSV export** of the embedded monthly series.
+
+- **Design**  
+  Dark UI tuned for charts, Playfair Display for headlines and large figures, Libre Franklin for body and UI, and a red accent for cost and disruption cues.
+
+## Tech stack
+
+| Layer | Choice |
+|--------|--------|
+| Framework | [Next.js](https://nextjs.org) 16 (App Router), static export (`output: "export"`) |
+| UI | React 19, inline styles in one client page |
+| Charts | [D3.js](https://d3js.org) (timeline, flows, sparklines), [Chart.js](https://www.chartjs.org/) (regional lines, donut) |
+| Utilities | lodash |
+
+## Data
+
+All series and tables are **embedded in the app** (no runtime API calls). Values are drawn from public sources such as EIA retail gasoline and import data, Tax Foundation state excise rates, and cited research; see the **Sources and methodology** section at the bottom of the live site for links and notes.
+
+## Project layout
+
+- `src/app/page.jsx` – main application (story + explorer, charts, data)
+- `src/app/layout.tsx` – fonts (Google: Libre Franklin, Playfair Display), metadata, JSON-LD
+- `src/app/globals.css` – base styles, scroll margins for in-page nav, print tweaks
+- `public/` – static assets (e.g. Open Graph image)
+
+## Scripts
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # local dev at http://localhost:3000
+npm run build    # static export to `out/`
+npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Deploy
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Configured for static hosting (e.g. Vercel). The production build produces static HTML and assets under `out/` after `next build`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Author
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Mukund Ummadisetti · 2026
